@@ -27,7 +27,7 @@ tier: 3
 <section id="mandatory-rules">
 <mandatory>
 - Fully autonomous after bootstrap user approval — do not wait for user input during execution
-- All subagent launches via Task tool MUST specify model="opus" — no exceptions
+- All subagent and teammate launches via Task tool MUST specify model="opus" — no exceptions
 - All message INSERTs into orchestration_messages MUST include message_type — no NULLs
 - All file creation MUST use temp/ for scratch files — NEVER /tmp/ directly
 - All task instruction files live in docs/tasks/ — no other location
@@ -36,8 +36,9 @@ tier: 3
 - Teammates for work estimated over 40k tokens — regular Task subagents for smaller work
 - Reference files are read selectively — read the sections index first, then only the section needed. Never load a full reference file.
 - Protocol transitions return to this file — reference files name the next protocol, Conductor finds it here before proceeding
-- Items with mandatory authority in Arranger phase sections are NOT modifiable by the Conductor, even within intra-phase authority
+- Items with mandatory authority tags in Arranger phase sections are NOT modifiable by the Conductor, even within intra-phase authority
 - Current plan path in MEMORY.md is the source of truth — if any referenced plan does not match, stop and investigate
+- Every state transition in the database MUST include last_heartbeat = datetime('now') — omitting the heartbeat is a bug
 </mandatory>
 </section>
 
@@ -53,6 +54,36 @@ The user observes your progress via terminal output. Output progress updates at 
 
 Your session runs on 1m context. This is deliberate — you need the headroom to hold the full picture across phases, reviews, errors, and re-planning. Use this capacity for strategic decisions, not for absorbing implementation detail that belongs in reference files.
 </core>
+
+<context>
+### Three-Tier Orchestration Model
+
+The Conductor coordinates work across three tiers. Understanding this model is essential — confusing tiers breaks the orchestration.
+
+**Tier 0 — This session (Conductor):** Reads plans, creates phases, launches and monitors all sessions, handles reviews, errors, and phase transitions. Never does implementation work. Uses 1m context for strategic coordination.
+
+**Tier 1 — External sessions (Musicians):** Full Claude Code sessions launched in separate kitty windows via the Bash tool. Each has its own independent context. Executes task instructions autonomously, coordinating via the comms-link database. Conductor launches these directly — they are NOT subagents.
+
+**Tier 2 — Subagents and Teammates:** Spawned by the Conductor or by Musicians using the Task tool. Share context pressure with their parent session. Used for task instruction creation (Copyist teammate), monitoring (watcher subagent), investigation (Explorer teammate), and focused work.
+
+### Context Headroom Strategy
+
+Your 1m context window is a shared resource. Every token spent on implementation detail is a token unavailable for coordination, review, and strategic decisions.
+
+**Use Conductor context for:** Wide-scope plan understanding, strategic phase decisions, cross-task coordination, quality assurance (reviews), error triage and diagnosis.
+
+**Delegate to teammates/subagents for:** Task instruction creation (Copyist), background monitoring (watcher), RAG queries, complex error investigation, codebase exploration.
+
+**Delegate to external sessions for:** ALL implementation work — code, tests, documentation, file creation, git commits, verification.
+
+### Delegation Thresholds
+
+- **Teammates (over 40k estimated tokens):** Task decomposition, complex error analysis, review deep-dives, Copyist instruction generation. Resumable with preserved context.
+- **Regular Task subagents (under 40k):** Monitoring watchers, simple polling, quick one-shot checks. Ephemeral.
+- **External sessions (Musicians):** All implementation work. Full Claude Code capabilities in independent windows.
+
+The Conductor should never write code, create documentation files, or run tests directly. This consumes context that should be reserved for coordination.
+</context>
 </section>
 
 <section id="protocol-registry">

@@ -351,41 +351,155 @@ Track pending RAG work in-session (1m context provides ample room) or in a simpl
 ## RAG Processing Workflow
 
 RAG processing has two trigger paths:
-- **Eager:** Immediately after a completion review approval when no other events are pending
-- **Fallback:** During the monitoring cycle when no reviews or errors need handling
+- **Eager (Review Workflow step 8):** Immediately after approving a completion review, if no other reviews or errors are pending
+- **Fallback (Monitoring cycle):** During quiet monitoring cycles when pending RAG entries exist and no other events need handling
 
-### Three Phases
+Both paths use the same workflow below. The workflow involves three distinct phases: overlap-check (subagent), decision (Conductor), and ingestion (subagent).
 
-**Phase 1: Overlap Check (Subagent)**
+### Step 1: Launch Overlap-Check Subagent
 
-Launch a teammate to check the RAG proposal against existing knowledge base entries:
-- Read the proposal file
-- Query local-rag for similar existing content
-- Report: duplicate (skip), partial overlap (merge candidate), or unique (ingest)
+<template follow="format">
+Task("Review RAG proposals for overlap", prompt="""
+Your role: Review RAG addition proposals for overlap with existing knowledge-base content.
 
-**Phase 2: Decision (Conductor)**
+## Knowledge-Base Philosophy
+- One concept per file — granular, atomic, independently queryable
+- Files are permanent — never deleted, marked outdated instead
+- Optimized for machine retrieval via RAG queries
+- Cross-references connect related concepts instead of merging
+- Each file: 50-300 lines typical, ~500 max, single focused concept
+- YAML frontmatter required (id, created, category, parent_topic, tags)
 
-The Conductor reviews the overlap check results and decides:
-- **Unique content:** Approve for ingestion
-- **Partial overlap:** Determine whether to merge with existing entry or keep as separate
-- **Duplicate:** Skip ingestion, delete proposal file
+## Your Task
+For each proposal:
+1. Read the proposal file. Note the musician's reasoning and the verbatim RAG content.
+2. Query `query_documents` with the proposal's primary topic at 0.5 threshold.
+3. Evaluate using these thresholds:
+   - No overlap (> 0.5): Recommend "ready to ingest"
+   - Weak overlap (0.4-0.5): Recommend "approve as new file"
+   - Moderate overlap (0.3-0.4): Recommend "review needed — consider merge"
+   - Strong overlap (< 0.3): Recommend "review needed — likely duplicate"
+
+## Output Format
+Write results to `temp/rag-review-{task-id}.md`:
+
+# RAG Proposal Review — {task-id}
+
+## Ready to Ingest
+| Proposal | Target Location | Recommendation |
+
+## Review Needed
+### proposals/rag-{name}.md
+- Overlap type: [duplicate / merge candidate / tangentially related]
+- Relevant existing files: [list with scores]
+- Subagent recommendation: [approve as-is / merge into X / skip]
+
+---
+Proposals to review: {LIST_OF_PROPOSAL_PATHS}
+Task ID: {task-id}
+""", model="opus", run_in_background=False)
+</template>
+
+### Step 2: Read Subagent Results
+
+Read `temp/rag-review-{task-id}.md`. Identify:
+- Which proposals are "ready to ingest" (no further review needed)
+- Which proposals need Conductor review (merge candidates, potential duplicates)
+
+### Step 3: Make Decisions
 
 <mandatory>The Conductor makes RAG decisions autonomously. If uncertain about a merge decision, defer to ingestion as a separate entry — deduplication is cheaper than lost knowledge.</mandatory>
 
-**Phase 3: Ingestion (Subagent)**
+For each "review needed" proposal, decide:
+- **Approve as-is:** Accept as new KB file
+- **Merge:** Edit existing KB file to integrate the proposal content (update YAML frontmatter, add cross-references, avoid duplication within the file)
+- **Skip/Reject:** Don't add to KB
 
-Launch a teammate to perform the actual ingestion:
-- Read the proposal file
-- Execute ingestion via local-rag tools
-- Confirm successful ingestion
-- Delete the proposal file after successful ingestion
+### Step 4: Perform Merges (if any)
+
+For each merge decision, edit the target knowledge-base file in place:
+- Read the proposal's verbatim RAG content
+- Read the existing KB file
+- Integrate content thoughtfully (preserve original file structure and philosophy)
+
+### Step 5: Write Ingestion Manifest
+
+<template follow="format">
+# RAG Ingestion Manifest — {task-id}
+
+## New Files to Extract
+| Proposal Path | Target KB Path | Source Task |
+|---------------|----------------|-------------|
+| docs/implementation/proposals/rag-X.md | docs/knowledge-base/category/name.md | {task-id} |
+
+## Modified Files to Re-ingest
+| KB Path | Modified By | Notes |
+|---------|------------|-------|
+| docs/knowledge-base/category/existing.md | Conductor merge ({task-id}) | Integrated proposal content |
+</template>
+
+### Step 6: Write Decision Log
+
+Write to `temp/rag-decisions-{task-id}.md` for resumption context:
+
+<template follow="format">
+# RAG Processing Decisions — {task-id}
+
+## Approved Proposals (Ready to Ingest)
+- proposals/rag-X.md → docs/knowledge-base/category/X.md (NEW)
+
+## Merged Proposals
+- proposals/rag-Y.md → merged into docs/knowledge-base/category/existing.md
+
+## Rejected Proposals
+- proposals/rag-Z.md (Reason: duplicate of existing-file.md)
+</template>
+
+### Step 7: Launch Ingestion Subagent
+
+<template follow="format">
+Task("Ingest RAG files", prompt="""
+Your role: Extract approved RAG files from proposals and ingest them into the local-rag server.
+
+## Input
+Ingestion manifest: docs/implementation/reports/rag-ingest-manifest-{task-id}.md
+
+## Steps
+1. For new files: Read each proposal's verbatim RAG content section. Write to target KB path exactly as written.
+2. For modified files: These exist at their KB path (conductor edited them). Just ingest.
+3. Ingest all files: Call `ingest_file` for each entry. Use the KB path as source name.
+4. Verify each ingestion: Query `query_documents` with the file's primary topic. Verify score < 0.3 (strong match confirms success).
+5. Clean up: Delete processed proposal files. Delete `temp/rag-decisions-{task-id}.md`.
+6. Report results: Files extracted, ingested, verified, any failures.
+""", model="opus", run_in_background=False)
+</template>
+
+### Step 8: Return to Monitoring
+
+After RAG processing completes, return to SKILL.md and locate the Phase Execution Protocol for monitoring cycle re-entry.
 
 ### Interruption Handling
 
-<mandatory>If the background message-watcher detects a state change (review, error, completion) during RAG processing, pause RAG work and handle the event first. RAG processing must never block review or error handling. Resume RAG processing after the event is handled.</mandatory>
+<mandatory>The background message-watcher runs continuously during all RAG phases. If it detects a state change (review, error, completion) during RAG processing, pause RAG work and handle the event first. RAG processing must NEVER block review or error handling.</mandatory>
 
-If interrupted mid-Phase-2 (decision): note the decision state in temp/ and resume from where you left off.
-If interrupted mid-Phase-3 (ingestion): the teammate handles its own completion. Check results when resuming.
+If interrupted during the decision phase (step 3):
+- Record decisions-so-far in `temp/rag-decisions-{task-id}.md`
+- Handle the interrupting event via the appropriate protocol (through SKILL.md)
+- After handling, resume RAG decisions from where you left off (read the decision log)
+
+If interrupted during the ingestion phase (step 7):
+- The ingestion subagent handles its own completion independently
+- After handling the interrupting event, check the subagent's results
+- If subagent completed: verify and clean up
+- If subagent was interrupted: re-launch with remaining items
+
+### Resumption After Session Exit
+
+If the Conductor session exits during RAG processing (context management):
+1. Check `temp/rag-decisions-{task-id}.md` — identifies which phase was interrupted
+2. If before overlap-check: re-launch overlap-check subagent from scratch
+3. If after overlap-check but before ingestion: resume at decision phase (read `temp/rag-review-*`)
+4. If after ingestion started: check ingestion results, re-launch if needed
 </core>
 </section>
 

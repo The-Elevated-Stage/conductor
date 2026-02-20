@@ -234,30 +234,133 @@ If the teammate investigation also fails to identify a clear fix, escalate to th
 <core>
 ## Subagent Failure Handling
 
-When a Conductor subagent (not a Musician — a subagent spawned by the Conductor itself) fails:
+This section covers failures of **Conductor subagents** (task instruction creation teammates, monitoring watchers, RAG processing subagents) — NOT Musician session errors. Musician errors are handled by the musician-error-workflow section.
 
 ### Retry Policy
 
-- **Maximum 3 retries** with the same prompt
-- After 3 failures: do not retry. Escalate.
+**3 retries maximum** with the same prompt and inputs. After 3 failures, escalate.
+
+```
+Attempt 1: Launch subagent with original prompt
+  ↓ failure
+Attempt 2: Relaunch with same prompt (transient failures self-resolve)
+  ↓ failure
+Attempt 3: Relaunch with same prompt (last automatic retry)
+  ↓ failure
+Escalate: Do not retry — the approach is wrong
+```
 
 ### Failure Categories
 
-| Category | Example | Response |
-|----------|---------|----------|
-| **Transient** | Timeout, rate limit, tool error | Retry immediately (count toward 3 max) |
-| **Prompt issue** | Misunderstood instructions, wrong output format | Revise prompt and retry |
-| **Tool failure** | MCP server down, file not found | Investigate root cause, fix if possible, retry |
-| **Fundamental** | Task is impossible with available tools, context exhausted | Do not retry. Escalate. |
+Classify each failure to determine whether retrying is worthwhile:
+
+**Category 1: Transient Failures**
+Symptoms: Timeout, connection reset, partial output, "context window exceeded" mid-generation.
+Retry strategy: Retry immediately. These resolve on their own. No prompt modification needed.
+
+```
+Attempt 1 failed: Subagent timed out after 10 minutes
+Action: Retry with same prompt (attempt 2)
+```
+
+**Category 2: Configuration Failures**
+Symptoms: Wrong skill name, missing file path, invalid tool call, "skill not found", "file does not exist".
+Retry strategy: Fix the configuration error in the prompt BEFORE retrying. Do NOT retry with the same broken prompt — it will fail identically.
+
+```
+Attempt 1 failed: "Skill 'writing-instructions' not found"
+Root cause: Skill name is 'copyist', not 'writing-instructions'
+Action: Fix skill name in prompt, retry (attempt 2)
+```
+
+Common configuration errors:
+- Wrong skill name (check `~/.claude/skills/` for exact names)
+- Wrong file path (verify paths exist before including in prompt)
+- Missing `subagent_type` parameter
+
+**Category 3: Logic Errors**
+Symptoms: Subagent completes but output is wrong — validation script fails, wrong template used, missing sections, incorrect SQL table names.
+Retry strategy: Add correction context to the prompt. Specify what went wrong and what the correct output looks like.
+
+```
+Attempt 1 failed: Validation shows 4 errors — wrong table name 'coordination_status'
+Action: Add to prompt: "Use table name 'orchestration_tasks', NOT 'coordination_status'."
+Retry (attempt 2)
+```
+
+**Category 4: Systemic Failures**
+Symptoms: Subagent produces fundamentally wrong output despite correct prompt. Plan content may be ambiguous, task may be too complex for single subagent, or skill has a bug.
+Retry strategy: Do NOT retry with same prompt. Escalate after first clear systemic failure, even if retry count < 3.
+
+```
+Attempt 1: Subagent created sequential instructions for a parallel phase
+Attempt 2: Same issue — subagent ignores task type parameter
+Assessment: Systemic — prompt or skill may need fixing
+Action: Escalate immediately (don't waste attempt 3)
+```
+
+### Retry Decision Flowchart
+
+```
+Subagent failed
+  │
+  ├─ Is this attempt 4+? ──YES──→ Escalate
+  │
+  NO
+  │
+  ├─ Is error transient (timeout, partial output)? ──YES──→ Retry same prompt
+  │
+  NO
+  │
+  ├─ Is error a configuration mistake? ──YES──→ Fix config, retry with corrected prompt
+  │
+  NO
+  │
+  ├─ Is error a logic error (wrong output)? ──YES──→ Add correction context, retry
+  │
+  NO
+  │
+  └─ Systemic failure ──→ Escalate (skip remaining retries)
+```
 
 ### Escalation After 3 Failures
 
-When 3 retries are exhausted, escalate. The escalation chain is:
-1. Can the Conductor work around the subagent failure? (e.g., do the work directly, use a different approach)
+<mandatory>Do not exceed 3 retries for the same subagent prompt. After 3, the approach is wrong — retrying won't fix it.</mandatory>
+
+Escalation chain:
+1. Can the Conductor work around the subagent failure? (e.g., do the work directly, use a different approach, fall back to manual process)
 2. If not, proceed to SKILL.md and locate the Repetiteur Protocol for re-planning assistance
 3. User is involved only if the Repetiteur also escalates
 
-<mandatory>Do not exceed 3 retries for the same subagent prompt. After 3, the approach is wrong — retrying won't fix it.</mandatory>
+### Escalation Message Format
+
+<template follow="format">
+Subagent failed {N} times creating {WHAT}.
+
+Error summary:
+- Attempt 1: {error description}
+- Attempt 2: {error description}
+- Attempt 3: {error description}
+
+Failure category: {transient | configuration | logic | systemic}
+
+Assessment: {why retrying won't help}
+Next action: {what the Conductor will try instead — workaround, Repetiteur escalation, etc.}
+</template>
+
+### Integration with Conductor Workflow
+
+**During Phase Planning (Copyist Teammate Failures):**
+1. Launch Copyist teammate with prompt from copyist-launch-template
+2. If teammate returns successfully → review output, proceed to database insertion
+3. If teammate fails → classify failure, apply retry strategy
+4. After 3 failures or systemic detection → escalate (workaround or Repetiteur)
+
+**During Monitoring (Watcher Subagent Failures):**
+1. Launch monitoring subagent (background)
+2. If subagent returns with state change report → handle event, relaunch
+3. If subagent fails or returns without useful data → retry (same 3-retry policy)
+4. Fallback: run `scripts/validate-coordination.sh` manually for monitoring
 </core>
 </section>
 

@@ -50,31 +50,116 @@ The phase section provides the implementation content needed for task decomposit
 <core>
 ## Danger File Assessment
 
-Before decomposing a phase into tasks, assess danger files — files that multiple tasks may modify simultaneously.
+Danger files are files that MAY be modified by 2+ parallel execution sessions. They represent potential write-write conflicts that could cause merge failures or data loss. Examples: barrel export files, shared configuration files, documentation index files, database migration files.
+
+Before decomposing a phase into tasks, assess danger files.
 
 ### 3-Step Governance Flow
 
-**Step 1: Extract from Plan**
-Identify inline danger file annotations in the phase section (marked with warning indicators or explicit mentions of shared files).
+**Step 1: Extract from Plan (Implementation Plan Annotations)**
 
-**Step 2: Assess Risk**
-For each shared file:
-- Which tasks touch it?
-- Are the modifications independent (different sections/functions) or overlapping?
-- Can the tasks be ordered to avoid conflicts?
+Identify inline danger file annotations in the phase section. The Arranger marks these with warning indicators:
 
-**Step 3: Decide Mitigation**
-- **Ordering within tasks:** If modifications are independent, order tasks so the more fundamental change goes first
-- **Append-only pattern:** If tasks add to a file (not modifying existing content), parallel is safe
-- **Sequential sub-steps:** Convert parallel tasks to sequential for the specific file operations
-- **Conductor batching:** Conductor collects modifications from multiple tasks and applies them in a single batch
+```markdown
+Task 3: Extract Testing Docs
+  - Source: docs/testing/*.md
+  - Target: knowledge-base/testing/
+  ⚠️ Danger Files: knowledge-base/testing/README.md (shared with Task 4)
+
+Task 5: Extract Database Docs
+  - Source: docs/database/*.md
+  - Target: knowledge-base/database/
+  (No danger files — fully independent)
+```
+
+**Step 2: Assess Risk (Context-Based Risk Analysis)**
+
+For each danger file, assess severity and timeline:
+
+**Severity:**
+- **Low:** Read-only overlap (both tasks read same file but don't modify it)
+- **Medium:** One task modifies, another reads (temporal dependency)
+- **High:** Both tasks modify same file (write-write conflict)
+
+**Timeline:** Do the modifications happen at the same time or at different phases of each task? Can one task complete its modifications before the other starts?
+
+**Decision matrix:**
+
+| Severity | Timeline Overlap | Decision |
+|----------|-----------------|----------|
+| Low | Any | Keep parallel |
+| Medium | None | Keep parallel, add ordering note |
+| Medium | Yes | Keep parallel with mitigation, or move to sequential |
+| High | Any | Move to sequential OR split into sub-steps |
+
+**Step 3: Handoff to Copyist (Data to Task Instruction Creation)**
+
+If keeping tasks parallel despite danger files, pass context to the Copyist in the Overrides & Learnings section:
+
+```
+## Parallel Task Dependencies
+
+Task 3 and Task 4 share: knowledge-base/testing/README.md
+- Task 3 creates the initial README with testing file index
+- Task 4 adds cross-references to testing files
+
+Mitigation: Task 3 should write README first (during early steps).
+Task 4's cross-reference additions should be a late step.
+If conflict at merge: Task 4's additions take priority for cross-references.
+```
+
+The Copyist writes this coordination logic directly into the task instruction files.
+
+### Mitigation Patterns
+
+**Pattern 1: Ordering Within Tasks**
+Structure task instructions so shared file modifications happen at predictable times:
+- Task A modifies shared file in Step 2 (early)
+- Task B modifies shared file in Step 7 (late)
+- Temporal separation reduces conflict probability
+
+**Pattern 2: Append-Only Modifications**
+Both tasks add content without modifying existing content:
+- Task A adds Section X
+- Task B adds Section Y
+- Git can auto-merge additions to different sections
+
+**Pattern 3: Conductor Batching**
+Tasks report their modifications as proposals. Conductor applies all in a single coordinated update:
+- Task A: "Add these 3 entries to index.ts"
+- Task B: "Add these 2 entries to index.ts"
+- Conductor: combines both, writes once
+
+**Pattern 4: Sequential Sub-Steps**
+Move only the danger file modification to a sequential sub-step:
+- Tasks 3-6 run in parallel for all non-shared work
+- After all complete, conductor runs a single sequential step to merge shared file changes
+
+### Danger File Reporting
+
+Execution sessions report danger file interactions via messages:
+
+<template follow="format">
+```sql
+INSERT INTO orchestration_messages (task_id, from_session, message, message_type) VALUES (
+    '{task-id}', '$CLAUDE_SESSION_ID',
+    'DANGER FILE UPDATE:
+     File: {path}
+     Action: {what was done}
+     Shared with: {other task IDs}
+     Status: {Complete, no conflicts detected / Conflict detected}',
+    'instruction'
+);
+```
+</template>
 
 ### Skip Conditions
 
 Danger file assessment is not needed when:
 - All tasks work on entirely separate files (common in decomposed phases)
-- The phase is already sequential
+- The phase is already sequential (single task)
 - The Arranger's plan explicitly marks the phase as parallel-safe with no shared resources
+- Shared files are read-only for all tasks in the phase
 </core>
 </section>
 
@@ -239,19 +324,78 @@ Launch one kitty window per task. All tasks for the phase launch simultaneously.
 <core>
 ## Sequential Execution Pattern
 
-Use when: single task per phase, strict ordering required, foundation work, shared resource constraints.
+Use when: single task per phase, strict ordering required, foundation work that later phases depend on, shared resource constraints that prevent parallelism.
 
-### Conductor Workflow
+Key characteristics: simpler than parallel — no danger file coordination, no verification watcher, no Sentinel needed. One task at a time.
 
-1. Create task instruction (via Copyist teammate)
-2. Insert database row and instruction message
-3. Launch single Musician kitty window with PID capture
-4. Launch background monitoring watcher
-5. Monitor via watcher — handle events as they arise (reviews, errors, completion)
-6. When task completes: close kitty window, verify against conductor-review checklist
-7. Proceed to next task or next phase
+### Conductor Workflow (Step by Step)
 
-No danger file coordination needed. Manual message checks between steps if needed.
+**Step 1: Create Task Instruction**
+
+Launch Copyist teammate for this single task. See copyist-launch-template section.
+
+**Step 2: Insert Database Row and Instruction Message**
+
+<template follow="exact">
+```sql
+INSERT INTO orchestration_tasks (task_id, state, instruction_path, last_heartbeat)
+VALUES ('{task-id}', 'watching', 'docs/tasks/{task-id}.md', datetime('now'));
+
+INSERT INTO orchestration_messages (task_id, from_session, message, message_type) VALUES (
+    '{task-id}', 'task-00',
+    'TASK INSTRUCTION: docs/tasks/{task-id}.md
+     Type: sequential
+     Phase: {N}
+     Dependencies: {prior task IDs or "none"}',
+    'instruction'
+);
+```
+</template>
+
+**Step 3: Launch Musician Session**
+
+Launch single kitty window with PID capture:
+
+<template follow="exact">
+```bash
+kitty --directory /home/kyle/claude/remindly --title "Musician: {task-id}" -- env -u CLAUDECODE claude --permission-mode acceptEdits "/musician
+
+Load the musician skill first, then proceed.
+
+**Your task:**
+
+Run this SQL query via comms-link:
+SELECT message FROM orchestration_messages WHERE task_id = '{task-id}' AND message_type = 'instruction';
+
+Read the returned message. It contains your complete task instructions for this phase. Follow every step, checkpoint, and requirement exactly as specified.
+
+**Context:**
+- Task ID: {task-id}
+- Phase: {PHASE_NUMBER} — {PHASE_NAME}
+
+Do not proceed without reading the full instruction message. All steps are there." &
+echo $! > temp/musician-{task-id}.pid
+```
+</template>
+
+**Step 4: Launch Background Monitoring Watcher**
+
+<mandatory>Background message-watcher must be running before any monitoring begins.</mandatory>
+
+Launch monitoring subagent (see monitoring-subagent-template section) with this single task ID.
+
+**Step 5: Monitor and Handle Events**
+
+Follow the monitoring cycle (monitoring-cycle section). Events route through event-routing section. For sequential tasks:
+- `needs_review` → handle via Review Protocol (SKILL.md)
+- `error` → handle via Error Recovery Protocol (SKILL.md)
+- `complete` → task done, proceed to step 6
+
+**Step 6: Task Complete**
+
+Close kitty window (kill PID, remove PID file). If more sequential tasks remain in this phase, return to step 1 for the next task. If this was the last task, proceed to phase-completion section.
+
+<mandatory>Wait for the task to reach `complete` state before launching the next sequential task. Sequential means sequential — no overlap.</mandatory>
 </core>
 </section>
 
@@ -259,24 +403,116 @@ No danger file coordination needed. Manual message checks between steps if neede
 <core>
 ## Parallel Execution Pattern
 
-Use when: 3+ independent tasks, no shared resource conflicts (or mitigated via danger file assessment).
+Use when: 3+ independent tasks with no shared file conflicts (or mitigated via danger file assessment). Key characteristics: background monitoring subagent, review checkpoints mandatory at logical points in each task, danger files governance for shared resources, full error recovery cycle.
 
-### Conductor Workflow
+### Conductor Workflow (Step by Step)
 
-1. Analyze danger files (danger-file-assessment section)
-2. Create all task instructions for the phase (single Copyist teammate call)
-3. Insert database rows for all tasks
-4. Insert instruction messages for all tasks
-5. Launch verification watcher
-6. Launch kitty windows (one per task, all simultaneously, each with PID capture)
-7. Launch Sentinel teammate
-8. Verification watcher confirms tasks reach `working` — re-launch failed ones
-9. After verification: launch main monitoring subagent
-10. Handle events via monitoring cycle (event-routing section)
-11. Phase completion: all tasks reach terminal state → verify against conductor-review checklist
+**Step 1: Analyze Phase for Danger Files**
 
-<mandatory>Background message-watcher must be running at all times during parallel execution. If any Musician enters `needs_review` or `error`, the watcher detects and exits — handle the event, then relaunch the watcher before continuing.</mandatory>
+Extract inline danger file annotations from the phase section. Decide: keep parallel (with mitigation) or move to sequential. See danger-file-assessment section.
+
+**Step 2: Create Task Instructions (Batch)**
+
+Launch ONE Copyist teammate to create ALL task instructions for the phase. Include danger file decisions in the Overrides & Learnings section. See copyist-launch-template section.
+
+**Step 3: Insert Database Rows**
+
+For each task in the phase, insert a task row:
+
+<template follow="exact">
+```sql
+INSERT INTO orchestration_tasks (task_id, state, instruction_path, last_heartbeat)
+VALUES ('{task-id}', 'watching', 'docs/tasks/{task-id}.md', datetime('now'));
+```
+</template>
+
+**Step 4: Insert Instruction Messages**
+
+For each task, insert the instruction message:
+
+<template follow="format">
+```sql
+INSERT INTO orchestration_messages (task_id, from_session, message, message_type) VALUES (
+    '{task-id}', 'task-00',
+    'TASK INSTRUCTION: docs/tasks/{task-id}.md
+Type: parallel
+Phase: {N}
+Dependencies: {task IDs or "none"}
+Danger files:
+  - {path} ({notes if shared})',
+    'instruction'
+);
+```
+</template>
+
+<mandatory>Musician claims task only after BOTH the task row (step 3) AND instruction message (step 4) exist. Do not launch Musicians before both are inserted for ALL tasks in the phase.</mandatory>
+
+**Step 5: Launch Verification Watcher**
+
+Before launching kitty windows, start a background verification watcher to confirm all sessions claim their tasks. This ensures monitoring is active before execution sessions start. See launch-verification section for the watcher prompt.
+
+**Step 6: Launch Kitty Windows**
+
+Launch one kitty window per task via the Bash tool. Use parallel Bash calls so all sessions start simultaneously. Each launch captures PID:
+
+<template follow="exact">
+```bash
+kitty --directory /home/kyle/claude/remindly --title "Musician: {task-id}" -- env -u CLAUDECODE claude --permission-mode acceptEdits "/musician
+
+Load the musician skill first, then proceed.
+
+**Your task:**
+
+Run this SQL query via comms-link:
+SELECT message FROM orchestration_messages WHERE task_id = '{task-id}' AND message_type = 'instruction';
+
+Read the returned message. It contains your complete task instructions for this phase. Follow every step, checkpoint, and requirement exactly as specified.
+
+**Context:**
+- Task ID: {task-id}
+- Phase: {PHASE_NUMBER} — {PHASE_NAME}
+
+Do not proceed without reading the full instruction message. All steps are there." &
+echo $! > temp/musician-{task-id}.pid
+```
+</template>
+
+**Step 7: Launch Sentinel Teammate**
+
+Launch the Sentinel monitoring teammate to watch Musicians' temp/ logs. See sentinel-launch section. Runs alongside the monitoring subagent.
+
+**Step 8: Verification Watcher Results**
+
+- If all tasks reach `working` within 5 minutes: verification passed, proceed
+- If any remain `watching` after 5 minutes: watcher notifies Conductor to re-launch failed kitty windows (check PID, close if needed, re-launch)
+
+**Step 9: Launch Main Monitoring Subagent**
+
+After verification complete, start the main background monitoring subagent. See monitoring-subagent-template section. This begins the monitoring cycle (monitoring-cycle section).
+
+**Step 10: Handle Events**
+
+Events detected by the monitoring watcher are routed via the event-routing section. Handle in priority order: errors first, then reviews, then completions.
+
+<mandatory>After handling ANY event, check the database for additional state changes (monitoring cycle step 5.5) before relaunching the watcher. Multiple tasks may have changed state while handling the first event.</mandatory>
+
+**Step 11: Phase Completion**
+
+When all tasks reach terminal state (`complete` or `exited`), proceed to phase-completion section.
+
+### Context Budget (Parallel Phases)
 </core>
+
+<context>
+Typical context costs per phase:
+- Task instruction creation teammate: one-time cost, not retained after completion
+- Monitoring subagent: minimal (small prompts, background)
+- Review processing: ~2-5k tokens per review (read message + proposal)
+- Error handling: ~3-8k tokens per error (read report + analysis)
+- Sentinel reports: negligible (short fire-and-forget messages)
+
+Budget for a 4-task phase: ~20-40k tokens of Conductor context.
+</context>
 </section>
 
 <section id="sentinel-launch">
@@ -297,25 +533,78 @@ Shutdown: message the Sentinel when the phase completes. If entering the Repetit
 <core>
 ## Monitoring Cycle
 
-The Conductor's monitoring loop during phase execution:
+The Conductor's monitoring loop during phase execution. This cycle repeats until all tasks in the phase reach terminal state.
 
 ### Cycle Steps
 
-1. **Launch background watcher** — Task subagent with `model="opus"`, `run_in_background=True`. See monitoring-subagent-template section.
-2. **Output progress** — Report to terminal: "Monitoring started for Phase {N}. Watching for state changes."
-3. **Wait for watcher exit** — Conductor pauses. User can ask questions or provide context.
-4. **Watcher detects event** — Exits background task. Conductor is notified.
-5. **Handle event** — Route via event-routing section to the appropriate protocol.
-5.5. **Check table for additional changes** — Before relaunching watcher, query `orchestration_tasks`:
-   - Check for new state changes on any task
-   - Read any new messages from `orchestration_messages` that arrived during step 5
-   - If additional events found: handle them sequentially (loop back to step 5 for each)
-6. **Relaunch watcher** — Launch new background watcher.
-7. **Repeat** — Return to step 2.
+**Step 1: Launch Background Watcher**
 
-<mandatory>Background message-watcher must be running before and after every event handling cycle. Relaunch immediately after handling any event — no work proceeds without an active watcher.</mandatory>
+<mandatory>Background message-watcher must be running before any monitoring begins. Verify the watcher launched successfully (save the task ID) before proceeding.</mandatory>
 
-<mandatory>After handling ANY event (review, error, completion), ALWAYS execute step 5.5 before relaunching the watcher. Multiple tasks may have changed state while you were handling the first event.</mandatory>
+Launch Task subagent with `model="opus"`, `run_in_background=True`. See monitoring-subagent-template section. The watcher polls the database and exits when it detects a state change.
+
+**Step 2: Output Progress**
+
+Report to terminal: "Monitoring started for Phase {N}. Watching for state changes on tasks {task-id list}." The user sees this and knows the Conductor is active.
+
+**Step 3: Wait for Watcher Exit**
+
+Conductor pauses. The user can ask questions, provide context, or interrupt — the Conductor responds without disrupting the watcher. The watcher runs independently in the background.
+
+**Step 4: Watcher Detects Event and Exits**
+
+The watcher detects a state change (`needs_review`, `error`, `complete`, `exited`, stale heartbeat, or fallback row) and IMMEDIATELY exits. The Conductor is notified of the watcher's exit.
+
+<mandatory>The watcher must EXIT on detection, not continue polling. The Conductor relies on the watcher's exit notification to know an event occurred. A watcher that detects and continues polling instead of exiting will block the Conductor indefinitely.</mandatory>
+
+**Step 5: Handle Event**
+
+Route via the event-routing section to the appropriate protocol (Review, Error Recovery, Musician Lifecycle, or Completion via SKILL.md).
+
+**Step 5.5: Check Table for Additional Changes**
+
+<mandatory>Before relaunching the watcher, ALWAYS query orchestration_tasks for additional state changes. Multiple tasks may have changed state while you were handling step 5.</mandatory>
+
+```sql
+SELECT task_id, state, last_heartbeat FROM orchestration_tasks
+WHERE task_id != 'task-00' AND state IN ('needs_review', 'error', 'complete', 'exited')
+ORDER BY last_heartbeat DESC;
+```
+
+Also read any new messages from `orchestration_messages` that arrived during step 5:
+
+```sql
+SELECT task_id, message, message_type, timestamp FROM orchestration_messages
+ORDER BY timestamp DESC LIMIT 10;
+```
+
+If additional events found: handle them sequentially (loop back to step 5 for each). Do not relaunch the watcher until all pending events are handled.
+
+**Step 6: Relaunch Watcher**
+
+<mandatory>Relaunch the background watcher immediately after all pending events are handled. No gap between event handling completion and watcher relaunch — every moment without a running watcher is a moment the Conductor is blind to state changes.</mandatory>
+
+Launch a new background watcher (same as step 1).
+
+**Step 7: Repeat**
+
+Return to step 2. Continue the cycle until all tasks reach terminal state, then proceed to phase-completion section.
+
+### Conductor Heartbeat
+
+During each monitoring cycle, the watcher refreshes the Conductor's own heartbeat (`task-00`). Musicians check this heartbeat with a 540-second (9-minute) threshold — if the Conductor's heartbeat goes stale, Musicians consider the Conductor down and may escalate.
+
+<mandatory>The monitoring watcher must refresh task-00 heartbeat on every poll cycle. If the Conductor has no watcher running, its heartbeat goes stale and Musicians will escalate unnecessarily.</mandatory>
+
+### Manual Monitoring Fallback
+
+If the monitoring subagent repeatedly fails (3 retries exhausted), fall back to manual monitoring using the validation script:
+
+```bash
+bash scripts/validate-coordination.sh
+```
+
+This checks database state, verifies table schema, and reports task statuses. Use it to manually poll while investigating why the subagent is failing. Route to the Error Recovery Protocol via SKILL.md for the subagent failure handling workflow.
 </core>
 </section>
 

@@ -1,4 +1,4 @@
-<skill name="conductor-example-error-recovery-workflow" version="2.0">
+<skill name="conductor-example-error-recovery-workflow" version="3.0">
 
 <metadata>
 type: example
@@ -148,19 +148,26 @@ ERROR (Retry 3/5): Same verification failure after 2 fix attempts
  Error persists: grep pattern may be wrong
 ```
 
-### Escalate Decision
+### Autonomous Investigation
 
-After analysis, if uncertain:
+After 3 failed retries, the Conductor launches an investigation teammate rather than prompting the user:
 
 ```
-Prompt user: "Task-05 has failed 3 times with verification mismatch.
- Previous fixes didn't resolve it.
- Options:
- 1. Investigate: I'll read the source file and verification pattern
- 2. Skip verification: Allow task to proceed without this check
- 3. Abort task: Mark as exited, handle manually later
- Which approach?"
+Launch teammate to investigate: "Task-05 has failed verification 3 times.
+ Previous fixes: heading change (retry 1), full file regeneration (retry 2).
+ Error persists — grep pattern may be wrong.
+
+ Investigate:
+ 1. Read the task instruction file for the expected verification pattern
+ 2. Read the actual generated file
+ 3. Determine if the verification pattern is wrong or the file content is wrong
+ 4. Propose a specific fix with evidence"
 ```
+
+Based on teammate findings, classify and respond:
+- If verification pattern is wrong → propose fix to update the pattern
+- If file content is persistently wrong → escalate to Repetiteur Protocol (via SKILL.md)
+- If root cause is ambiguous after investigation → escalate to Repetiteur Protocol (via SKILL.md)
 </core>
 </section>
 
@@ -203,7 +210,7 @@ INSERT INTO orchestration_messages (task_id, from_session, message, message_type
      Handoff location: temp/task-05-HANDOFF
      Next session: musician-task-05-S2 will resume from step 3.5
      Re-verify step 3 completion before resuming agents',
-    'context_warning'
+    'fix_proposal'
 );
 ```
 

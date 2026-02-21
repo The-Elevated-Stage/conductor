@@ -56,21 +56,16 @@ Before decomposing a phase into tasks, assess danger files.
 
 ### 3-Step Governance Flow
 
-**Step 1: Extract from Plan (Implementation Plan Annotations)**
+**Step 1: Identify Danger Files (Conductor Self-Discovery)**
 
-Identify inline danger file annotations in the phase section. The Arranger marks these with warning indicators:
+During task decomposition, the Conductor identifies danger files independently by checking:
 
-```markdown
-Task 3: Extract Testing Docs
-  - Source: docs/testing/*.md
-  - Target: knowledge-base/testing/
-  ⚠️ Danger Files: knowledge-base/testing/README.md (shared with Task 4)
+1. **Explicit overlaps** — files named in multiple task descriptions as targets for modification
+2. **Shared entry points** — barrel exports (`index.ts`, `index.dart`), route registrations, config files, package manifests
+3. **Schema/migration files** — database schemas, API contracts, any file where ordering matters
+4. **Test fixtures** — shared test data, mock setups, test utility files referenced by multiple tasks
 
-Task 5: Extract Database Docs
-  - Source: docs/database/*.md
-  - Target: knowledge-base/database/
-  (No danger files — fully independent)
-```
+Also check for inline annotations in the phase section — the Arranger may mark known conflicts, but the Conductor must not rely solely on these annotations.
 
 **Step 2: Assess Risk (Context-Based Risk Analysis)**
 
@@ -181,7 +176,15 @@ For each phase, the Conductor determines how to split the work into tasks. The A
 
 <mandatory>If unable to determine how to split a phase into tasks, launch a teammate for focused discussion with Explorer access for codebase context. Gemini as fallback for guidance. Do not guess at task boundaries — a bad decomposition wastes more context than the investigation costs.</mandatory>
 
-After receiving and reviewing Copyist instructions:
+After receiving Copyist instructions, validate each file:
+
+```bash
+bash scripts/validate-instruction.sh docs/tasks/{task-id}.md
+```
+
+If any file fails validation, route to the Copyist Failure handling in the copyist-launch-template section. Do not proceed with invalid instructions.
+
+After validation passes:
 - Insert database rows for each task (database-task-creation section)
 - Insert instruction messages for each task
 - Proceed to Musician launch
@@ -213,15 +216,7 @@ danger file decisions, or lessons from prior phases that override
 the implementation plan for these tasks}
 
 ## Instructions
-1. Read the implementation plan at `{PLAN_PATH}`, lines {LINE_START} to {LINE_END} only
-2. Invoke the `copyist` skill
-3. Read the appropriate template (sequential or parallel)
-4. Extract the tasks listed above from the plan
-5. Apply any Overrides & Learnings — these take precedence over the plan
-6. Write instruction files to `docs/tasks/`
-7. Validate each file and fix errors until all pass
-
-Report validation results for each file when done.
+Use the Instructions section from the Copyist's launch prompt template (`copyist/references/launch-prompt-template.md`). Do not maintain an independent copy here — the Copyist skill owns the canonical instruction steps.
 </template>
 
 <mandatory>Copyist receives the line range, not the full plan path. Task decomposition is the Conductor's responsibility — the Copyist creates instructions for the tasks the Conductor specifies.</mandatory>
@@ -494,7 +489,7 @@ After verification complete, start the main background monitoring subagent. See 
 
 Events detected by the monitoring watcher are routed via the event-routing section. Handle in priority order: errors first, then reviews, then completions.
 
-<mandatory>After handling ANY event, check the database for additional state changes (monitoring cycle step 5.5) before relaunching the watcher. Multiple tasks may have changed state while handling the first event.</mandatory>
+<mandatory>After handling ANY event, check the database for additional state changes (monitoring cycle step 5.5). Multiple tasks may have changed state while handling the first event.</mandatory>
 
 **Step 11: Phase Completion**
 
@@ -551,19 +546,19 @@ Report to terminal: "Monitoring started for Phase {N}. Watching for state change
 
 Conductor pauses. The user can ask questions, provide context, or interrupt — the Conductor responds without disrupting the watcher. The watcher runs independently in the background.
 
-**Step 4: Watcher Detects Event and Exits**
+**Step 4: Watcher Exits**
 
 The watcher detects a state change (`needs_review`, `error`, `complete`, `exited`, stale heartbeat, or fallback row) and IMMEDIATELY exits. The Conductor is notified of the watcher's exit.
 
 <mandatory>The watcher must EXIT on detection, not continue polling. The Conductor relies on the watcher's exit notification to know an event occurred. A watcher that detects and continues polling instead of exiting will block the Conductor indefinitely.</mandatory>
 
-**Step 5: Handle Event**
+**Step 5: Follow Message-Watcher Exit Protocol**
 
-Route via the event-routing section to the appropriate protocol (Review, Error Recovery, Musician Lifecycle, or Completion via SKILL.md).
+Proceed to SKILL.md → Message-Watcher Exit Protocol. This protocol handles reading the message, relaunching the watcher immediately, and then routing to the appropriate handler (or queueing the event if mid-handler).
 
 **Step 5.5: Check Table for Additional Changes**
 
-<mandatory>Before relaunching the watcher, ALWAYS query orchestration_tasks for additional state changes. Multiple tasks may have changed state while you were handling step 5.</mandatory>
+<mandatory>After handling an event, ALWAYS query orchestration_tasks for additional state changes before returning to the monitoring wait state. Multiple tasks may have changed state while you were handling step 5.</mandatory>
 
 ```sql
 SELECT task_id, state, last_heartbeat FROM orchestration_tasks
@@ -578,17 +573,15 @@ SELECT task_id, message, message_type, timestamp FROM orchestration_messages
 ORDER BY timestamp DESC LIMIT 10;
 ```
 
-If additional events found: handle them sequentially (loop back to step 5 for each). Do not relaunch the watcher until all pending events are handled.
+If additional events found: handle them sequentially (loop back to step 5 for each).
 
-**Step 6: Relaunch Watcher**
+**Step 6: Return to Wait State**
 
-<mandatory>Relaunch the background watcher immediately after all pending events are handled. No gap between event handling completion and watcher relaunch — every moment without a running watcher is a moment the Conductor is blind to state changes.</mandatory>
-
-Launch a new background watcher (same as step 1).
+The watcher is already running (relaunched in step 5 via the Message-Watcher Exit Protocol). Return to step 3 and wait for the next watcher exit.
 
 **Step 7: Repeat**
 
-Return to step 2. Continue the cycle until all tasks reach terminal state, then proceed to phase-completion section.
+Continue the cycle until all tasks reach terminal state, then proceed to phase-completion section.
 
 ### Conductor Heartbeat
 
@@ -676,7 +669,7 @@ When the monitoring watcher exits with a detected event, route based on state:
 | Stale heartbeat | Return to SKILL.md, locate Error Recovery Protocol (stale-heartbeat-recovery section) |
 | Fallback row (`claim_blocked`) | Return to SKILL.md, locate Error Recovery Protocol (claim-failure-recovery section) |
 
-After handling ANY event through the appropriate protocol, return here and execute monitoring cycle step 5.5 (check for additional changes) before relaunching the watcher.
+After handling ANY event through the appropriate protocol, return here and execute monitoring cycle step 5.5 (check for additional changes).
 </core>
 </section>
 
@@ -703,6 +696,8 @@ Each Musician's background watcher monitors only its own task_id — it will det
 ## Phase Completion
 
 When all tasks in the current phase reach terminal state (`complete` or `exited`):
+
+**Systemic failure check:** If ALL tasks in the phase are `exited` (none `complete`), treat this as a systemic failure. Do not proceed to the next phase. Route to the Repetiteur Protocol via SKILL.md — a total phase failure indicates a plan-level problem, not individual task issues.
 
 1. Check for unprocessed proposals in `docs/implementation/proposals/` and `temp/`
 2. Integrate critical proposals, defer non-critical
@@ -772,7 +767,7 @@ DELETE FROM orchestration_tasks WHERE task_id = 'fallback-{session-id}';
 SELECT task_id, state, last_heartbeat,
   (julianday('now') - julianday(last_heartbeat)) * 86400 AS seconds_stale
 FROM orchestration_tasks
-WHERE state NOT IN ('complete', 'exited')
+WHERE state IN ('working', 'review_approved', 'review_failed', 'fix_proposed')
   AND (julianday('now') - julianday(last_heartbeat)) * 86400 > 540;
 ```
 </template>

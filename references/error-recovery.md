@@ -101,9 +101,9 @@ ORDER BY timestamp DESC LIMIT 1;
 Apply error-classification logic. Propose fix using fix-proposal-sql or escalate as appropriate.
 
 ### Step 5: Return to monitoring
-After sending the fix proposal, return to SKILL.md and locate the Phase Execution Protocol. The monitoring cycle re-entry handles relaunching the watcher and checking for additional events.
+After sending the fix proposal, return to SKILL.md and locate the Phase Execution Protocol. The monitoring cycle re-entry handles checking for additional events.
 
-<mandatory>Background message-watcher must be relaunched after error handling completes. No work proceeds without an active watcher.</mandatory>
+<mandatory>After error handling completes, proceed to SKILL.md → Message-Watcher Exit Protocol if the watcher is not already running.</mandatory>
 </core>
 </section>
 

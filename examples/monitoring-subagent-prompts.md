@@ -1,4 +1,4 @@
-<skill name="conductor-example-monitoring-subagent-prompts" version="2.0">
+<skill name="conductor-example-monitoring-subagent-prompts" version="3.0">
 
 <metadata>
 type: example
@@ -69,14 +69,20 @@ Monitor orchestration_tasks for state changes using comms-link query tool.
 
 **Tasks to watch:** task-03, task-04, task-05, task-06
 
-**Poll every 30 seconds with this query:**
+**Each poll cycle:**
 
-SELECT task_id, state, last_heartbeat,
-       retry_count,
-       (julianday('now') - julianday(last_heartbeat)) * 86400 as seconds_stale
-FROM orchestration_tasks
-WHERE task_id IN ('task-03', 'task-04', 'task-05', 'task-06')
-ORDER BY task_id;
+1. Refresh conductor heartbeat:
+   UPDATE orchestration_tasks SET last_heartbeat = datetime('now') WHERE task_id = 'task-00';
+
+2. Query task states:
+   SELECT task_id, state, last_heartbeat,
+          retry_count,
+          (julianday('now') - julianday(last_heartbeat)) * 86400 as seconds_stale
+   FROM orchestration_tasks
+   WHERE task_id IN ('task-03', 'task-04', 'task-05', 'task-06')
+   ORDER BY task_id;
+
+**Poll every 30 seconds.**
 
 **Report back IMMEDIATELY when ANY task reaches:**
 - needs_review — execution wants conductor review

@@ -1,4 +1,4 @@
-<skill name="conductor-example-initialization" version="2.0">
+<skill name="conductor-example-initialization" version="3.0">
 
 <metadata>
 type: example
@@ -35,10 +35,14 @@ Implementation plan: `docs/plans/2026-02-04-docs-reorganization.md`
 
 <section id="read-plan">
 <core>
-## Step 1: Read Implementation Plan
+## Step 1: Read Implementation Plan (Selective)
+
+Read the plan-index block first, then use its line ranges to read only the Overview and Phase Summary sections:
 
 ```
-Read docs/plans/2026-02-04-docs-reorganization.md
+Read docs/plans/2026-02-04-docs-reorganization.md (lines 1-15 for plan-index)
+Read docs/plans/2026-02-04-docs-reorganization.md (lines per plan-index for Overview)
+Read docs/plans/2026-02-04-docs-reorganization.md (lines per plan-index for Phase Summary)
 ```
 
 Identify:
@@ -107,8 +111,9 @@ Read the full knowledge graph via memory MCP `read_graph`. Review for project-wi
 Via comms-link execute:
 </core>
 
-<template follow="exact">
+<template follow="format">
 ```sql
+-- Core DDL shown here. Full DDL (including indexes) is in references/initialization.md.
 DROP TABLE IF EXISTS orchestration_tasks;
 DROP TABLE IF EXISTS orchestration_messages;
 

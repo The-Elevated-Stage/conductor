@@ -74,7 +74,7 @@ If approving a completion review that has RAG proposals (type: `rag-addition` in
 ### Step 9: Return to Phase Execution Protocol
 After review completes, return to SKILL.md and locate the Phase Execution Protocol. The monitoring cycle re-entry handles checking for additional state changes and relaunching the watcher.
 
-<mandatory>Background message-watcher must be relaunched after review handling completes. No work proceeds without an active watcher.</mandatory>
+<mandatory>After review handling completes, proceed to SKILL.md → Message-Watcher Exit Protocol if the watcher is not already running.</mandatory>
 </core>
 </section>
 
@@ -161,7 +161,7 @@ WHERE task_id = '{task-id}' AND message_type = 'review_request';
 ```
 </template>
 
-Cap at 5 review cycles per checkpoint. At cycle 5, the issue is beyond review-level fixes — proceed to SKILL.md and locate the Error Recovery Protocol for deeper investigation. If Error Recovery also exhausts its attempts, the escalation chain continues to the Repetiteur Protocol.
+Cap at 5 review cycles per checkpoint. At cycle 5, the issue is beyond review-level fixes — proceed to SKILL.md and locate the Error Recovery Protocol for deeper investigation. If Error Recovery also exhausts its attempts, the escalation chain continues to the Repetiteur Protocol (via SKILL.md).
 
 <mandatory>Do not exceed 5 review cycles for a single checkpoint. Repeated rejections indicate a fundamental issue, not a cosmetic one.</mandatory>
 </core>
@@ -338,7 +338,7 @@ working → needs_review → [Conductor: review_failed] → working → needs_re
 After approving a completion review that has RAG proposals (`rag-addition` type in `docs/implementation/proposals/`):
 
 1. Check `orchestration_tasks` for other tasks in `needs_review` or `error` state
-2. If none pending: launch RAG processing immediately (see rag-processing-workflow section)
+2. If none pending: launch RAG teammate immediately (see rag-processing-workflow section)
 3. If other reviews or errors are pending: handle those first — RAG processing must never block review handling
 4. Deferred RAG processing will be caught during the next monitoring cycle when no other events are pending
 
@@ -354,13 +354,19 @@ RAG processing has two trigger paths:
 - **Eager (Review Workflow step 8):** Immediately after approving a completion review, if no other reviews or errors are pending
 - **Fallback (Monitoring cycle):** During quiet monitoring cycles when pending RAG entries exist and no other events need handling
 
-Both paths use the same workflow below. The workflow involves three distinct phases: overlap-check (subagent), decision (Conductor), and ingestion (subagent).
+Both paths use the same workflow: launch a single RAG teammate that handles the entire process autonomously.
 
-### Step 1: Launch Overlap-Check Subagent
+### Launch RAG Teammate
+
+Launch a background teammate that autonomously processes all pending RAG proposals. The Conductor immediately returns to its monitoring loop — no gap in orchestration coverage.
 
 <template follow="format">
-Task("Review RAG proposals for overlap", prompt="""
-Your role: Review RAG addition proposals for overlap with existing knowledge-base content.
+Task("Process RAG proposals", prompt="""
+Your role: Autonomously process RAG addition proposals — check for overlap, check for invalidated existing entries, make decisions, perform merges, write files, ingest, and clean up.
+
+## Proposals to Process
+{LIST_OF_PROPOSAL_PATHS}
+Source task: {task-id}
 
 ## Knowledge-Base Philosophy
 - One concept per file — granular, atomic, independently queryable
@@ -370,136 +376,75 @@ Your role: Review RAG addition proposals for overlap with existing knowledge-bas
 - Each file: 50-300 lines typical, ~500 max, single focused concept
 - YAML frontmatter required (id, created, category, parent_topic, tags)
 
-## Your Task
+## Deduplication Policy
+- Decisions/designs/rationale → keep as separate entries even if overlapping (cross-reference between them)
+- Code examples/templates/snippets → no duplication, merge or replace
+- Safe default: if uncertain, ingest separately — deduplication is cheap, lost knowledge is expensive
+
+## Your Workflow
+
+### Phase 1: Overlap Check
 For each proposal:
 1. Read the proposal file. Note the musician's reasoning and the verbatim RAG content.
 2. Query `query_documents` with the proposal's primary topic at 0.5 threshold.
-3. Evaluate using these thresholds:
-   - No overlap (> 0.5): Recommend "ready to ingest"
-   - Weak overlap (0.4-0.5): Recommend "approve as new file"
-   - Moderate overlap (0.3-0.4): Recommend "review needed — consider merge"
-   - Strong overlap (< 0.3): Recommend "review needed — likely duplicate"
+3. Evaluate overlap:
+   - No overlap (> 0.5): Mark "ready to ingest"
+   - Weak overlap (0.4-0.5): Mark "approve as new file"
+   - Moderate overlap (0.3-0.4): Mark "review needed — consider merge"
+   - Strong overlap (< 0.3): Mark "review needed — likely duplicate"
 
-## Output Format
-Write results to `temp/rag-review-{task-id}.md`:
+### Phase 2: Check for Invalidated Existing Entries
+Query `query_documents` for topics related to the new work. Check if any existing entries are:
+- **Stale** — contain outdated information superseded by the new work
+- **Anti-patterns** — describe approaches the new work has replaced
+- **Incomplete** — missing information the new work now provides
 
-# RAG Proposal Review — {task-id}
+For invalidated entries: mark them as outdated (add `status: outdated` to YAML frontmatter and a note explaining what supersedes them), then re-ingest.
 
-## Ready to Ingest
-| Proposal | Target Location | Recommendation |
-
-## Review Needed
-### proposals/rag-{name}.md
-- Overlap type: [duplicate / merge candidate / tangentially related]
-- Relevant existing files: [list with scores]
-- Subagent recommendation: [approve as-is / merge into X / skip]
-
----
-Proposals to review: {LIST_OF_PROPOSAL_PATHS}
-Task ID: {task-id}
-""", model="opus", run_in_background=False)
-</template>
-
-### Step 2: Read Subagent Results
-
-Read `temp/rag-review-{task-id}.md`. Identify:
-- Which proposals are "ready to ingest" (no further review needed)
-- Which proposals need Conductor review (merge candidates, potential duplicates)
-
-### Step 3: Make Decisions
-
-<mandatory>The Conductor makes RAG decisions autonomously. If uncertain about a merge decision, defer to ingestion as a separate entry — deduplication is cheaper than lost knowledge.</mandatory>
-
-For each "review needed" proposal, decide:
+### Phase 3: Make Decisions
+For each "review needed" proposal, decide autonomously:
 - **Approve as-is:** Accept as new KB file
-- **Merge:** Edit existing KB file to integrate the proposal content (update YAML frontmatter, add cross-references, avoid duplication within the file)
-- **Skip/Reject:** Don't add to KB
+- **Merge:** Edit existing KB file to integrate the proposal content
+- **Skip/Reject:** Don't add to KB (log reason)
 
-### Step 4: Perform Merges (if any)
+If uncertain about a tough decision, message the Conductor via SendMessage with the specific question. Continue processing other proposals while waiting.
 
-For each merge decision, edit the target knowledge-base file in place:
-- Read the proposal's verbatim RAG content
-- Read the existing KB file
-- Integrate content thoughtfully (preserve original file structure and philosophy)
+### Phase 4: Execute
+1. For new files: Extract verbatim RAG content from proposals, write to target KB paths
+2. For merges: Read existing KB file, integrate proposal content, preserve file structure
+3. For invalidated entries: Update YAML frontmatter with `status: outdated`
+4. Ingest all files: Call `ingest_file` for each. Use KB path as source name.
+5. Verify: Query `query_documents` for each file's primary topic. Score < 0.3 confirms success.
 
-### Step 5: Write Ingestion Manifest
+### Phase 5: Clean Up
+1. Delete processed proposal files from `docs/implementation/proposals/`
+2. Delete any temp files (`temp/rag-decisions-*.md`, `temp/rag-review-*.md`)
+3. Write decision log to `temp/rag-decisions-{task-id}.md` for reference
 
-<template follow="format">
-# RAG Ingestion Manifest — {task-id}
-
-## New Files to Extract
-| Proposal Path | Target KB Path | Source Task |
-|---------------|----------------|-------------|
-| docs/implementation/proposals/rag-X.md | docs/knowledge-base/category/name.md | {task-id} |
-
-## Modified Files to Re-ingest
-| KB Path | Modified By | Notes |
-|---------|------------|-------|
-| docs/knowledge-base/category/existing.md | Conductor merge ({task-id}) | Integrated proposal content |
+### Phase 6: Report
+Message the Conductor via SendMessage with results:
+- Files ingested (new): count
+- Files merged: count
+- Existing entries invalidated: count
+- Verification passed: count
+- Any failures or tough decisions deferred
+""", model="opus", run_in_background=True)
 </template>
 
-### Step 6: Write Decision Log
+### Conductor Behavior During RAG Processing
 
-Write to `temp/rag-decisions-{task-id}.md` for resumption context:
+After launching the RAG teammate, the Conductor immediately returns to its monitoring loop. The teammate works independently in the background.
 
-<template follow="format">
-# RAG Processing Decisions — {task-id}
-
-## Approved Proposals (Ready to Ingest)
-- proposals/rag-X.md → docs/knowledge-base/category/X.md (NEW)
-
-## Merged Proposals
-- proposals/rag-Y.md → merged into docs/knowledge-base/category/existing.md
-
-## Rejected Proposals
-- proposals/rag-Z.md (Reason: duplicate of existing-file.md)
-</template>
-
-### Step 7: Launch Ingestion Subagent
-
-<template follow="format">
-Task("Ingest RAG files", prompt="""
-Your role: Extract approved RAG files from proposals and ingest them into the local-rag server.
-
-## Input
-Ingestion manifest: docs/implementation/reports/rag-ingest-manifest-{task-id}.md
-
-## Steps
-1. For new files: Read each proposal's verbatim RAG content section. Write to target KB path exactly as written.
-2. For modified files: These exist at their KB path (conductor edited them). Just ingest.
-3. Ingest all files: Call `ingest_file` for each entry. Use the KB path as source name.
-4. Verify each ingestion: Query `query_documents` with the file's primary topic. Verify score < 0.3 (strong match confirms success).
-5. Clean up: Delete processed proposal files. Delete `temp/rag-decisions-{task-id}.md`.
-6. Report results: Files extracted, ingested, verified, any failures.
-""", model="opus", run_in_background=False)
-</template>
-
-### Step 8: Return to Monitoring
-
-After RAG processing completes, return to SKILL.md and locate the Phase Execution Protocol for monitoring cycle re-entry.
-
-### Interruption Handling
-
-<mandatory>The background message-watcher runs continuously during all RAG phases. If it detects a state change (review, error, completion) during RAG processing, pause RAG work and handle the event first. RAG processing must NEVER block review or error handling.</mandatory>
-
-If interrupted during the decision phase (step 3):
-- Record decisions-so-far in `temp/rag-decisions-{task-id}.md`
-- Handle the interrupting event via the appropriate protocol (through SKILL.md)
-- After handling, resume RAG decisions from where you left off (read the decision log)
-
-If interrupted during the ingestion phase (step 7):
-- The ingestion subagent handles its own completion independently
-- After handling the interrupting event, check the subagent's results
-- If subagent completed: verify and clean up
-- If subagent was interrupted: re-launch with remaining items
+- **Teammate messages:** The Conductor picks up SendMessage notifications during the next monitoring cycle. For tough decisions, respond with guidance. For completion notifications, acknowledge and note for the phase completion report.
+- **No blocking:** RAG processing never blocks review or error handling. The teammate operates fully independently.
+- **Interruption:** If the Conductor needs to enter the Repetiteur Protocol (all Musicians paused), shut down the RAG teammate. Re-launch after consultation completes if proposals remain.
 
 ### Resumption After Session Exit
 
-If the Conductor session exits during RAG processing (context management):
-1. Check `temp/rag-decisions-{task-id}.md` — identifies which phase was interrupted
-2. If before overlap-check: re-launch overlap-check subagent from scratch
-3. If after overlap-check but before ingestion: resume at decision phase (read `temp/rag-review-*`)
-4. If after ingestion started: check ingestion results, re-launch if needed
+If the Conductor session exits during RAG processing:
+1. Check `temp/rag-decisions-{task-id}.md` — the teammate writes progress here
+2. Check `docs/implementation/proposals/` — unprocessed proposals still exist
+3. Re-launch a new RAG teammate with the remaining proposals
 </core>
 </section>
 

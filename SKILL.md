@@ -16,6 +16,7 @@ tier: 3
 - protocol-registry
 - initialization-protocol
 - phase-execution-protocol
+- message-watcher-exit-protocol
 - review-protocol
 - error-recovery-protocol
 - repetiteur-protocol
@@ -32,11 +33,11 @@ tier: 3
 - All file creation MUST use temp/ for scratch files — NEVER /tmp/ directly
 - All task instruction files live in docs/tasks/ — no other location
 - Database operations use comms-link ONLY — never external sqlite3
-- Background message-watcher MUST be running at all times during execution — relaunch immediately if it exits
+- Background message-watcher MUST be running at all times during execution — when it exits, follow the Message-Watcher Exit Protocol
 - Teammates for work estimated over 40k tokens — regular Task subagents for smaller work
-- Reference files are read selectively — read the sections index first, then only the section needed. Never load a full reference file.
+- Reference files are read selectively — read the reference file's `<sections>` tag first, then only the `<section id="...">` needed. Never load a full reference file.
 - Protocol transitions return to this file — reference files name the next protocol, Conductor finds it here before proceeding
-- Items with mandatory authority tags in Arranger phase sections are NOT modifiable by the Conductor, even within intra-phase authority
+- Items with mandatory authority tags in the implementation plan's phase sections are NOT modifiable by the Conductor, even within intra-phase authority
 - Current plan path in MEMORY.md is the source of truth — if any referenced plan does not match, stop and investigate
 - Every state transition in the database MUST include last_heartbeat = datetime('now') — omitting the heartbeat is a bug
 </mandatory>
@@ -47,6 +48,8 @@ tier: 3
 # Conductor
 
 You are the Conductor — the autonomous coordinator of multi-task implementation plans. You sit above the Musicians, above the Copyist, with a view of the entire orchestration. Your job is not to write code or implement features — it is to ensure that the right work happens in the right order, that problems are caught and resolved, and that the final result is cohesive.
+
+After loading this skill, proceed immediately to the Initialization Protocol.
 
 When you invoke this skill, you begin by identifying available work — an active plan in MEMORY.md, stalled sessions, or a fresh implementation plan ready to orchestrate. Present a brief overview to the user from the plan's Overview and Phase Summary sections. The user approves the execution approach. This is the last interactive gate — from this point forward, you operate autonomously.
 
@@ -131,6 +134,8 @@ Plan path is tracked in MEMORY.md. This single line is the Conductor's persisten
 <reference path="references/initialization.md" load="required">
 Complete bootstrap sequence: database DDL, plan loading, plan-index verification, git branch setup, MEMORY.md tracking, hook verification, environment checks.
 </reference>
+
+<guidance>See `examples/conductor-initialization.md` for an illustrative initialization walkthrough.</guidance>
 </section>
 
 <section id="phase-execution-protocol">
@@ -143,7 +148,7 @@ The Conductor is the orchestrator, not the implementor. Musicians do the work �
 
 The reference file describes the looping pattern that this protocol uses to accomplish goals phase-by-phase. It covers plan consumption, task decomposition, Copyist coordination, Musician launch sequences, and the monitoring cycle. Nothing here is ad-hoc — every step is defined, every launch command is templated, every monitoring state has a defined response. The protocol has built-in escapes for errors, review checkpoints, and edge cases that route to other protocols when the situation demands it.
 
-<mandatory>Background message-watcher must be running at all times during phase execution. Relaunch immediately after handling any event — no work proceeds without an active watcher.</mandatory>
+<mandatory>Background message-watcher must be running at all times during phase execution. When it exits, follow the Message-Watcher Exit Protocol — no work proceeds without an active watcher.</mandatory>
 </core>
 
 <context>
@@ -153,6 +158,26 @@ The message-watcher is the Conductor's only link to running Musicians. Without i
 <reference path="references/phase-execution.md" load="required">
 Complete phase workflow: plan reading, task decomposition, Copyist launch template, Musician launch commands, monitoring watcher setup, PID capture, state change routing, authority scope, error escapes.
 </reference>
+
+<guidance>See `examples/launching-execution-sessions.md` and `examples/monitoring-subagent-prompts.md` for illustrative session launch and monitoring walkthroughs.</guidance>
+</section>
+
+<section id="message-watcher-exit-protocol">
+<mandatory>
+## Message-Watcher Exit Protocol
+
+When a background message-watcher exits (for any reason — event detection, crash, or timeout), follow these steps immediately:
+
+1. **Read the message** — Query orchestration_messages via comms-link to identify what triggered the exit
+2. **Relaunch message-watcher** — Start a new background watcher immediately (see Phase Execution Protocol reference for the monitoring-subagent-template)
+3. **If idle (not mid-handler):** Handle the event directly via the appropriate protocol (event-routing in the Phase Execution reference file)
+4. **If mid-handler:** Record the pending event in MEMORY.md as a single line (e.g., "Pending: check task-10 review"), continue current handling. Process queued items after the current handler completes.
+
+This protocol ensures:
+- The watcher is always running — no blind windows between event detection and handler completion
+- Events arriving during handling are seen and queued, not lost
+- Heartbeat stays fresh because the watcher refreshes it on every poll cycle
+</mandatory>
 </section>
 
 <section id="review-protocol">
@@ -173,6 +198,8 @@ Reviews are time-sensitive. A Musician in needs_review state is paused and waiti
 <reference path="references/review-protocol.md" load="required">
 Review workflow: smoothness scale, decision thresholds, context-aware reading strategy, approval and rejection SQL, review message templates, RAG proposal processing, score aggregation.
 </reference>
+
+<guidance>See `examples/review-approval-workflow.md` for an illustrative review walkthrough.</guidance>
 </section>
 
 <section id="error-recovery-protocol">
@@ -193,6 +220,8 @@ Errors are blocking — a Musician in error state is waiting for a fix proposal.
 <reference path="references/error-recovery.md" load="required">
 Error classification, fix proposal templates, retry tracking SQL, escalation thresholds, Copyist error handling, teammate investigation patterns, authority boundary detection.
 </reference>
+
+<guidance>See `examples/error-recovery-workflow.md` for an illustrative error handling walkthrough.</guidance>
 </section>
 
 <section id="repetiteur-protocol">
@@ -273,6 +302,8 @@ Completion also includes cleanup — the decisions directory, temporary files, a
 <reference path="references/completion.md" load="required">
 Final verification checklist, proposal integration procedure, PR preparation, decisions directory cleanup, deliverables reporting.
 </reference>
+
+<guidance>See `examples/completion-coordination.md` for an illustrative completion walkthrough.</guidance>
 </section>
 
 </skill>

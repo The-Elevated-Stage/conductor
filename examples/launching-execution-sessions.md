@@ -1,4 +1,4 @@
-<skill name="conductor-example-launching-execution-sessions" version="2.0">
+<skill name="conductor-example-launching-execution-sessions" version="3.0">
 
 <metadata>
 type: example
@@ -139,6 +139,7 @@ Read the returned message. It contains your complete task instructions for this 
 - Phase: 2 — Extraction Tasks
 
 Do not proceed without reading the full instruction message. All steps are there." &
+echo $! > temp/musician-task-03.pid
 ```
 </template>
 
@@ -161,10 +162,11 @@ Read the returned message. It contains your complete task instructions for this 
 - Phase: 2 — Extraction Tasks
 
 Do not proceed without reading the full instruction message. All steps are there." &
+echo $! > temp/musician-task-04.pid
 ```
 
 ```bash
-# Bash calls 3 & 4 (parallel): Same pattern with task-05 and task-06
+# Bash calls 3 & 4 (parallel): Same pattern with task-05 and task-06, each with PID capture
 ```
 
 All sessions coordinate autonomously via comms-link database.

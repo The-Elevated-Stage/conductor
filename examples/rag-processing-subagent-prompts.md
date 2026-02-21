@@ -1,4 +1,4 @@
-<skill name="conductor-example-rag-processing-subagent-prompts" version="2.0">
+<skill name="conductor-example-rag-processing-teammate-prompt" version="3.0">
 
 <metadata>
 type: example
@@ -8,161 +8,135 @@ tier: 3
 
 <sections>
 - workflow-overview
-- overlap-check-subagent
-- ingestion-subagent
+- rag-teammate-prompt
 </sections>
 
 <section id="workflow-overview">
 <context>
-# RAG Processing Subagent Prompts
+# RAG Processing Teammate Prompt
 
-Two subagents are launched during RAG proposal processing (Monitoring step 6.5 or Review Workflow step 9).
+A single background teammate handles the entire RAG processing workflow autonomously. The Conductor launches this teammate and immediately returns to its monitoring loop — no gap in orchestration coverage.
 
-## Full RAG Processing Workflow
+## Trigger Paths
 
-This workflow runs during the monitoring cycle when RAG proposals are pending and no other events require attention. The background watcher is active throughout — if a new event arrives, pause RAG processing to handle it.
+- **Eager (Review Workflow step 8):** Immediately after approving a completion review with RAG proposals, if no other reviews or errors are pending
+- **Fallback (Monitoring cycle):** During quiet monitoring cycles when pending RAG entries exist and no other events need handling
 
-1. Launch overlap-check subagent (below)
-2. Read subagent results from `temp/rag-review-{task-id}.md`
-3. For "ready to ingest" items: no user action needed
-4. For "review needed" items: present to user in bulk with subagent recommendations and relevant existing RAG files. User decides per proposal: approve as new file, merge into existing, or reject.
-5. Perform merges — conductor edits existing knowledge-base files in place (complex editorial work)
-6. Write ingestion manifest to `docs/implementation/reports/rag-ingest-manifest-{task-id}.md` — list of files to ingest (new files from proposals + any modified existing files from merges)
-7. Write decision log to `temp/rag-decisions-{task-id}.md` — rejected proposals, approved proposals with target locations, merge details
-8. Set `review_approved` — send approval message via `orchestration_messages`. Musician can now release and idle. RAG ingestion continues independently.
-9. Launch ingestion subagent (below)
-10. Resume normal monitoring cycle
+## Conductor's Role
+
+The Conductor launches the teammate and resumes monitoring. The teammate works independently:
+- Reads proposals, checks overlap, checks for invalidated existing entries
+- Makes decisions autonomously using the deduplication policy
+- Messages the Conductor via SendMessage only for tough decisions
+- Sends a completion message when done
+- The Conductor picks up messages in the next monitoring cycle
 </context>
 </section>
 
-<section id="overlap-check-subagent">
+<section id="rag-teammate-prompt">
 <core>
-## 1. Overlap-Check Subagent
+## RAG Teammate Launch
 
-**When:** Monitoring step 6.5, first action after confirming pending RAG work.
-**Model:** opus
-**Output:** `temp/rag-review-{task-id}.md`
-
-### Task Tool Prompt
+The Conductor launches this teammate using the Task tool with `model="opus"` and `run_in_background=True`:
 </core>
 
 <template follow="format">
-```
-Read the RAG proposal files listed below, then read examples/rag-processing-subagent-prompts.md
-in the conductor skill for your detailed instructions.
+```python
+Task("Process RAG proposals", prompt="""
+Your role: Autonomously process RAG addition proposals — check for overlap, check for
+invalidated existing entries, make decisions, perform merges, write files, ingest, and clean up.
 
-Proposals to review: {LIST_OF_PROPOSAL_PATHS}
-Task ID: {TASK_ID}
-```
-</template>
+## Proposals to Process
+{LIST_OF_PROPOSAL_PATHS}
+Source task: {task-id}
 
-<core>
-### Detailed Instructions (read by subagent from this file)
-
-**Your role:** Review RAG addition proposals for overlap with existing knowledge-base content.
-
-**Knowledge-base philosophy (critical context):**
+## Knowledge-Base Philosophy
 - One concept per file — granular, atomic, independently queryable
 - Files are permanent — never deleted, marked outdated instead
-- Optimized for machine retrieval via RAG queries, not human reading
-- Cross-references connect related concepts instead of merging them
+- Optimized for machine retrieval via RAG queries
+- Cross-references connect related concepts instead of merging
 - Each file: 50-300 lines typical, ~500 max, single focused concept
 - YAML frontmatter required (id, created, category, parent_topic, tags)
 - Categories: conductor, implementation, reference, testing, api, database, plans, templates
 
-**What belongs in knowledge-base:** Validated patterns from completed work, architectural decisions with rationale, reusable technical patterns, reference material for future sessions.
+## Deduplication Policy
+- Decisions/designs/rationale → keep as separate entries even if overlapping (cross-reference)
+- Code examples/templates/snippets → no duplication, merge or replace
+- Safe default: if uncertain, ingest separately — deduplication is cheap, lost knowledge is expensive
 
-**What does NOT belong:** Untested ideas, task-specific implementation details, temporary workarounds, comprehensive multi-concept guides.
+## Workflow
 
-**For each proposal:**
+### Phase 1: Overlap Check
+For each proposal:
+1. Read the proposal file. Note the musician's reasoning and the verbatim RAG content.
+2. Use the musician's pre-compiled RAG match list as a starting point.
+3. Query `query_documents` with the proposal's primary topic at 0.5 threshold.
+4. Evaluate:
+   - No overlap (> 0.5): Mark "ready to ingest"
+   - Weak overlap (0.4-0.5): Mark "approve as new file"
+   - Moderate overlap (0.3-0.4): Mark "review needed — consider merge"
+   - Strong overlap (< 0.3): Mark "review needed — likely duplicate"
 
-1. Read the proposal file. Note:
-   - The musician's reasoning section (why they think this belongs in KB)
-   - The verbatim RAG file content (the actual proposed KB entry)
-   - The musician's pre-compiled RAG match list (entries matching at 0.4 threshold)
+### Phase 2: Check for Invalidated Existing Entries
+Query `query_documents` for topics related to the new work. Check if any existing entries are:
+- Stale — contain outdated information superseded by the new work
+- Anti-patterns — describe approaches the new work has replaced
+- Incomplete — missing information the new work now provides
 
-2. Use the musician's match list as a starting point. For each match listed, assess relevance to the proposed content.
+For invalidated entries: mark as outdated (add `status: outdated` to YAML frontmatter
+and a note explaining what supersedes them), then re-ingest.
 
-3. Query `query_documents` with the proposal's primary topic at 0.5 threshold to catch additional overlap the musician may have missed (the 0.4-0.5 band).
+### Phase 3: Make Decisions
+For each "review needed" proposal, decide:
+- Approve as-is: Accept as new KB file
+- Merge: Edit existing KB file to integrate the proposal content
+- Skip/Reject: Don't add to KB (log reason)
 
-4. Evaluate each proposal:
-   - **No overlap (> 0.5 on all queries):** Recommend "ready to ingest"
-   - **Weak overlap (0.4-0.5):** Recommend "approve as new file" with note about tangentially related entries
-   - **Moderate overlap (0.3-0.4):** Recommend "review needed — consider merge" and identify the specific existing file(s)
-   - **Strong overlap (< 0.3):** Recommend "review needed — likely duplicate" and identify the matching file(s)
+Apply the deduplication policy above. If uncertain about a tough decision,
+message the Conductor via SendMessage with the specific question.
+Continue processing other proposals while waiting for a response.
 
-5. Write results to `temp/rag-review-{task-id}.md`:
-</core>
+### Phase 4: Execute
+1. New files: Extract verbatim RAG content from proposals, write to target KB paths
+2. Merges: Read existing KB file, integrate proposal content, preserve file structure
+3. Invalidated entries: Update YAML frontmatter with `status: outdated`
+4. Ingest all files: Call `ingest_file` for each. Use KB path as source name.
+5. Verify: Query `query_documents` for each file's primary topic. Score < 0.3 = success.
 
-<template follow="format">
-```markdown
-# RAG Proposal Review — {task-id}
+### Phase 5: Clean Up
+1. Delete processed proposal files from `docs/implementation/proposals/`
+2. Delete temp files (`temp/rag-decisions-*.md`, `temp/rag-review-*.md`)
+3. Write decision log to `temp/rag-decisions-{task-id}.md` for reference
 
-## Ready to Ingest
-| Proposal | Target Location | Recommendation |
-|----------|----------------|----------------|
-| proposals/rag-{name}.md | knowledge-base/{category}/{filename}.md | New file, no overlap |
-
-## Review Needed
-### proposals/rag-{name}.md
-- **Overlap type:** [duplicate / merge candidate / tangentially related]
-- **Relevant existing files:** [list with scores]
-- **Musician reasoning:** [from proposal]
-- **Subagent recommendation:** [approve as-is / merge into {existing-file} / skip — with brief justification]
-```
-</template>
-</section>
-
-<section id="ingestion-subagent">
-<core>
-## 2. Ingestion Subagent
-
-**When:** After conductor completes RAG decisions and sets `review_approved` (workflow step 9 above).
-**Model:** opus
-**Input:** Ingestion manifest at `docs/implementation/reports/rag-ingest-manifest-{task-id}.md`
-
-### Task Tool Prompt
-</core>
-
-<template follow="format">
-```
-Process the RAG ingestion manifest, then read examples/rag-processing-subagent-prompts.md
-in the conductor skill for your detailed instructions.
-
-Manifest: docs/implementation/reports/rag-ingest-manifest-{task-id}.md
-Task ID: {TASK_ID}
+### Phase 6: Report
+Message the Conductor via SendMessage with results:
+- Files ingested (new): count
+- Files merged: count
+- Existing entries invalidated: count
+- Verification passed: count
+- Any failures or tough decisions deferred
+""", model="opus", run_in_background=True)
 ```
 </template>
 
 <core>
-### Detailed Instructions (read by subagent from this file)
+### Example Scenario
 
-**Your role:** Extract approved RAG files from proposals and ingest them into the local-rag server.
+Proposals pending after task-03 completion review:
+- `docs/implementation/proposals/rag-widget-testing.md` (rag-addition)
+- `docs/implementation/proposals/rag-api-testing-patterns.md` (rag-addition)
 
-**Steps:**
+The Conductor launches the RAG teammate with these two paths as `{LIST_OF_PROPOSAL_PATHS}` and immediately returns to monitoring. The teammate:
 
-1. Read the ingestion manifest. It contains:
-   - List of new files to extract (proposal path → target knowledge-base path)
-   - List of modified existing files to re-ingest (knowledge-base paths edited by conductor during merge)
+1. Reads both proposals, queries for overlap
+2. Finds `rag-widget-testing.md` has no overlap (> 0.5) — marks ready to ingest
+3. Finds `rag-api-testing-patterns.md` has moderate overlap (0.35) with existing `docs/knowledge-base/testing/api-test-patterns.md`
+4. Checks if existing entry is stale — finds it's still accurate but incomplete
+5. Decides to merge (new content supplements existing rather than duplicating)
+6. Writes new file, merges existing file, ingests both, verifies
+7. Cleans up proposals, sends completion message to Conductor
 
-2. **For new files:** Read each proposal's verbatim RAG content section. Write it to the target knowledge-base path exactly as written (the conductor and user have already approved this content).
-
-3. **For modified files:** These already exist at their knowledge-base path (conductor edited them during merge). No extraction needed — just ingest.
-
-4. **Ingest all files:** Call `ingest_file` for each entry in the manifest. Use the file's knowledge-base path as the source name.
-
-5. **Verify each ingestion:** After ingesting, query `query_documents` with the file's primary topic. Verify score < 0.3 (strong match confirms successful ingestion). Log any verification failures.
-
-6. **Archive manifest:** Move the manifest from `docs/implementation/reports/rag-ingest-manifest-{task-id}.md` to `docs/implementation/reports/archive/rag-ingest-manifest-{task-id}.md` (create archive/ directory if needed).
-
-7. **Clean up:** Delete `temp/rag-decisions-{task-id}.md`.
-
-8. **Report results:**
-   - Files extracted: count
-   - Files ingested: count
-   - Verification passed: count
-   - Verification failed: count + details
-   - Manifest archived: yes/no
+The Conductor picks up the completion message during its next monitoring cycle.
 </core>
 </section>
 

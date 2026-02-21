@@ -200,7 +200,7 @@ INSERT INTO orchestration_messages (task_id, from_session, message, message_type
 ```
 </template>
 
-Close the kitty window (kill PID, remove PID file). Route to Error Recovery Protocol — the Conductor may attempt its own corrections or escalate to Repetiteur Protocol if the issue exceeds intra-phase authority.
+Close the kitty window (kill PID, remove PID file). Route to Error Recovery Protocol (via SKILL.md) — the Conductor may attempt its own corrections or escalate to Repetiteur Protocol if the issue exceeds intra-phase authority. Proceed to SKILL.md → Message-Watcher Exit Protocol to ensure the watcher is running.
 </core>
 </section>
 
@@ -414,6 +414,8 @@ Do not proceed without reading the full instruction message. All steps are there
 echo $! > temp/musician-task-XX.pid
 ```
 </template>
+
+After launching the replacement session, proceed to SKILL.md → Message-Watcher Exit Protocol to ensure the watcher is running for the new session.
 </core>
 </section>
 

@@ -326,7 +326,7 @@ After receiving the handoff message, execute these steps in order:
    - Close and clean up removed tasks
    - Create new task rows and launch for new tasks
 
-7. **Resume normal execution** — Return to SKILL.md and locate the Phase Execution Protocol for monitoring and coordination.
+7. **Resume normal execution** — Return to SKILL.md and locate the Phase Execution Protocol for monitoring and coordination. Proceed to SKILL.md → Message-Watcher Exit Protocol to ensure the watcher is running for resumed/new Musicians.
 
 8. **Do NOT re-verify completed work** marked as unaffected. The Repetiteur's impact assessment already verified isolation.
 

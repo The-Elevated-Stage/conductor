@@ -59,7 +59,7 @@ ORDER BY task_id;
 
 All tasks must be in terminal state (`complete` or `exited`). If any task is `exited` rather than `complete`, note it for the completion report but continue with integration — `exited` tasks had clean handoffs or were intentionally terminated.
 
-If any task is still in a non-terminal state, do not proceed. Investigate via the Error Recovery Protocol.
+If any task is still in a non-terminal state, do not proceed. Investigate via the Error Recovery Protocol (via SKILL.md).
 </core>
 </section>
 

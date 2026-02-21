@@ -1,4 +1,4 @@
-<skill name="conductor-example-review-approval-workflow" version="2.0">
+<skill name="conductor-example-review-approval-workflow" version="3.0">
 
 <metadata>
 type: example
@@ -27,6 +27,8 @@ This example shows the conductor handling a review request from an execution ses
 ## Scenario
 
 Monitoring subagent reports: "task-03 state changed to needs_review"
+
+**Note:** This example is illustrative — steps shown here are scenario-specific and may not map 1:1 to the reference protocol. For the authoritative review workflow, see `references/review-protocol.md`. RAG proposal handling (if present in the review) follows the RAG processing workflow in that reference file.
 </context>
 </section>
 

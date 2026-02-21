@@ -1,4 +1,4 @@
-<skill name="conductor-example-completion-coordination" version="2.0">
+<skill name="conductor-example-completion-coordination" version="3.0">
 
 <metadata>
 type: example
@@ -163,7 +163,7 @@ If Repetiteur consultations had occurred (journals present), preserve the direct
 
 ```bash
 # Review all commits
-git log --oneline feat/docs-reorganization..HEAD
+git log --oneline main..HEAD
 
 # Check for sensitive data
 git diff main --stat

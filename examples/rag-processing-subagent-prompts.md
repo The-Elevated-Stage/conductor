@@ -1,10 +1,26 @@
+<skill name="conductor-example-rag-processing-subagent-prompts" version="2.0">
+
+<metadata>
+type: example
+parent-skill: conductor
+tier: 3
+</metadata>
+
+<sections>
+- workflow-overview
+- overlap-check-subagent
+- ingestion-subagent
+</sections>
+
+<section id="workflow-overview">
+<context>
 # RAG Processing Subagent Prompts
 
 Two subagents are launched during RAG proposal processing (Monitoring step 6.5 or Review Workflow step 9).
 
 ## Full RAG Processing Workflow
 
-This workflow runs at Monitoring step 6.5 when STATUS.md has "Pending RAG Processing" entries and no other events are pending. The background watcher is active throughout — if a new event arrives, pause RAG processing to handle it.
+This workflow runs during the monitoring cycle when RAG proposals are pending and no other events require attention. The background watcher is active throughout — if a new event arrives, pause RAG processing to handle it.
 
 1. Launch overlap-check subagent (below)
 2. Read subagent results from `temp/rag-review-{task-id}.md`
@@ -15,11 +31,12 @@ This workflow runs at Monitoring step 6.5 when STATUS.md has "Pending RAG Proces
 7. Write decision log to `temp/rag-decisions-{task-id}.md` — rejected proposals, approved proposals with target locations, merge details
 8. Set `review_approved` — send approval message via `orchestration_messages`. Musician can now release and idle. RAG ingestion continues independently.
 9. Launch ingestion subagent (below)
-10. Update STATUS.md — mark "Pending RAG Processing" entry as complete
-11. Proceed to Monitoring step 7
+10. Resume normal monitoring cycle
+</context>
+</section>
 
----
-
+<section id="overlap-check-subagent">
+<core>
 ## 1. Overlap-Check Subagent
 
 **When:** Monitoring step 6.5, first action after confirming pending RAG work.
@@ -27,7 +44,9 @@ This workflow runs at Monitoring step 6.5 when STATUS.md has "Pending RAG Proces
 **Output:** `temp/rag-review-{task-id}.md`
 
 ### Task Tool Prompt
+</core>
 
+<template follow="format">
 ```
 Read the RAG proposal files listed below, then read examples/rag-processing-subagent-prompts.md
 in the conductor skill for your detailed instructions.
@@ -35,7 +54,9 @@ in the conductor skill for your detailed instructions.
 Proposals to review: {LIST_OF_PROPOSAL_PATHS}
 Task ID: {TASK_ID}
 ```
+</template>
 
+<core>
 ### Detailed Instructions (read by subagent from this file)
 
 **Your role:** Review RAG addition proposals for overlap with existing knowledge-base content.
@@ -71,7 +92,9 @@ Task ID: {TASK_ID}
    - **Strong overlap (< 0.3):** Recommend "review needed — likely duplicate" and identify the matching file(s)
 
 5. Write results to `temp/rag-review-{task-id}.md`:
+</core>
 
+<template follow="format">
 ```markdown
 # RAG Proposal Review — {task-id}
 
@@ -87,9 +110,11 @@ Task ID: {TASK_ID}
 - **Musician reasoning:** [from proposal]
 - **Subagent recommendation:** [approve as-is / merge into {existing-file} / skip — with brief justification]
 ```
+</template>
+</section>
 
----
-
+<section id="ingestion-subagent">
+<core>
 ## 2. Ingestion Subagent
 
 **When:** After conductor completes RAG decisions and sets `review_approved` (workflow step 9 above).
@@ -97,7 +122,9 @@ Task ID: {TASK_ID}
 **Input:** Ingestion manifest at `docs/implementation/reports/rag-ingest-manifest-{task-id}.md`
 
 ### Task Tool Prompt
+</core>
 
+<template follow="format">
 ```
 Process the RAG ingestion manifest, then read examples/rag-processing-subagent-prompts.md
 in the conductor skill for your detailed instructions.
@@ -105,7 +132,9 @@ in the conductor skill for your detailed instructions.
 Manifest: docs/implementation/reports/rag-ingest-manifest-{task-id}.md
 Task ID: {TASK_ID}
 ```
+</template>
 
+<core>
 ### Detailed Instructions (read by subagent from this file)
 
 **Your role:** Extract approved RAG files from proposals and ingest them into the local-rag server.
@@ -134,3 +163,7 @@ Task ID: {TASK_ID}
    - Verification passed: count
    - Verification failed: count + details
    - Manifest archived: yes/no
+</core>
+</section>
+
+</skill>

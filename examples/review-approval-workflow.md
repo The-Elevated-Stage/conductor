@@ -1,3 +1,25 @@
+<skill name="conductor-example-review-approval-workflow" version="2.0">
+
+<metadata>
+type: example
+parent-skill: conductor
+tier: 3
+</metadata>
+
+<sections>
+- scenario
+- read-review-message
+- update-conductor-state
+- read-proposal
+- check-self-correction
+- approve
+- reject-revision
+- reject-major
+- resume-monitoring
+</sections>
+
+<section id="scenario">
+<context>
 # Example: Review Approval Workflow
 
 This example shows the conductor handling a review request from an execution session.
@@ -5,7 +27,11 @@ This example shows the conductor handling a review request from an execution ses
 ## Scenario
 
 Monitoring subagent reports: "task-03 state changed to needs_review"
+</context>
+</section>
 
+<section id="read-review-message">
+<core>
 ## Step 1: Read the Review Message
 
 ```sql
@@ -35,7 +61,11 @@ Key Outputs:
   - docs/implementation/proposals/rag-widget-testing.md (rag-addition)
   - docs/implementation/reports/task-03-checkpoint-2.md (created)
 ```
+</core>
+</section>
 
+<section id="update-conductor-state">
+<core>
 ## Step 2: Update Conductor State
 
 ```sql
@@ -43,7 +73,11 @@ UPDATE orchestration_tasks
 SET state = 'reviewing', last_heartbeat = datetime('now')
 WHERE task_id = 'task-00';
 ```
+</core>
+</section>
 
+<section id="read-proposal">
+<core>
 ## Step 3: Read the Proposal
 
 Read `docs/implementation/proposals/task-03-testing-extraction.md` and evaluate:
@@ -52,25 +86,33 @@ Read `docs/implementation/proposals/task-03-testing-extraction.md` and evaluate:
 - Is the task type appropriate?
 - Are deliverables complete?
 - Is quality acceptable (smoothness 2/9 = minor issues, self-resolved)?
+</core>
+</section>
 
-## Step 3b: Check Self-Correction Flag (ADD-48)
+<section id="check-self-correction">
+<core>
+## Step 3b: Check Self-Correction Flag
 
 Before deciding on approval or rejection, check if musician reported self-correction:
 
-**From the review message (line 23):** `Self-Correction: false`
+**From the review message:** `Self-Correction: false`
 
 **Decision logic:**
 - **If Self-Correction: false** → Context estimates are reliable. Make approval/rejection decision normally.
 - **If Self-Correction: true** → Context estimates are unreliable (~6x bloat). Additional steps:
-  1. Compare actual context % (line 22: 28%) to task instruction's estimated cost for this checkpoint
+  1. Compare actual context % to task instruction's estimated cost for this checkpoint
   2. If actual >> estimated: Musician may be thrashing. Ask if they want to exit early or continue.
   3. If actual ≈ estimated: Tell musician to reset flag to false, estimates are back in sync.
   4. If remaining work + actual context > 80%: Recommend setting task to `fix_proposed` for early handoff.
+</core>
 
+<context>
 Note: Task-03 shows "Self-Correction: false" and "Context Usage: 28% (safe to proceed)" so no additional context handling needed.
+</context>
+</section>
 
----
-
+<section id="approve">
+<core>
 ## Step 4a: Approve (Smoothness 0-5)
 
 ```sql
@@ -92,7 +134,11 @@ UPDATE orchestration_tasks
 SET state = 'watching', last_heartbeat = datetime('now')
 WHERE task_id = 'task-00';
 ```
+</core>
+</section>
 
+<section id="reject-revision">
+<core>
 ## Step 4b: Reject (Smoothness 6-7 — Revision Needed)
 
 ```sql
@@ -118,7 +164,11 @@ UPDATE orchestration_tasks
 SET state = 'watching', last_heartbeat = datetime('now')
 WHERE task_id = 'task-00';
 ```
+</core>
+</section>
 
+<section id="reject-major">
+<core>
 ## Step 4c: Reject (Smoothness 8-9 — Major Issues)
 
 ```sql
@@ -143,16 +193,16 @@ UPDATE orchestration_tasks
 SET state = 'watching', last_heartbeat = datetime('now')
 WHERE task_id = 'task-00';
 ```
+</core>
+</section>
 
+<section id="resume-monitoring">
+<core>
 ## Step 5: Resume Monitoring
 
 After handling the review, relaunch monitoring subagent for remaining active tasks.
+</core>
+</section>
 
-## Step 6: Update STATUS.md (Task Section)
 
-```markdown
-### Task 3: Extract Testing Docs
-State: review_approved (2026-02-04 10:45) | Type: Parallel | Phase: 2
-- Review 1: Smoothness 2/9, approved. Extraction quality good.
-- Danger file README.md created, task-04 cleared to proceed.
-```
+</skill>

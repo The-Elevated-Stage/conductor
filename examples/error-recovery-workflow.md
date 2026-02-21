@@ -1,3 +1,26 @@
+<skill name="conductor-example-error-recovery-workflow" version="2.0">
+
+<metadata>
+type: example
+parent-skill: conductor
+tier: 3
+</metadata>
+
+<sections>
+- scenario
+- read-error-message
+- read-error-report
+- analyze-and-decide
+- propose-fix
+- execution-processes-fix
+- resume-monitoring
+- alternative-complex-error
+- alternative-context-exhaustion
+- alternative-terminal-error
+</sections>
+
+<section id="scenario">
+<context>
 # Example: Error Recovery Workflow
 
 This example shows the conductor handling an error from an execution session.
@@ -5,7 +28,11 @@ This example shows the conductor handling an error from an execution session.
 ## Scenario
 
 Monitoring subagent reports: "task-05 state changed to error, retry_count = 1"
+</context>
+</section>
 
+<section id="read-error-message">
+<core>
 ## Step 1: Read Error Message
 
 ```sql
@@ -27,7 +54,11 @@ task-05 | c1d2e3f4-5a6b-7c8d-9e0f-1a2b3c4d5e6f | ERROR (Retry 1/5): Test failed 
    - docs/implementation/reports/task-05-error-retry-1.md (created)
  Awaiting conductor fix proposal
 ```
+</core>
+</section>
 
+<section id="read-error-report">
+<core>
 ## Step 2: Read Error Report
 
 Read `docs/implementation/reports/task-05-error-retry-1.md` for detailed context:
@@ -38,13 +69,21 @@ Read `docs/implementation/reports/task-05-error-retry-1.md` for detailed context
 - Stack trace: N/A (grep mismatch)
 - Retry count: 1 of 5
 - Suggested fix: Update verification pattern or fix heading
+</core>
+</section>
 
+<section id="analyze-and-decide">
+<core>
 ## Step 3: Analyze and Decide
 
 Decision tree:
 - **Simple fix?** Yes — heading mismatch is a naming convention issue
 - **Action:** Propose fix with correct heading
+</core>
+</section>
 
+<section id="propose-fix">
+<core>
 ## Step 4: Propose Fix
 
 ```sql
@@ -66,7 +105,11 @@ INSERT INTO orchestration_messages (task_id, from_session, message, message_type
     'fix_proposal'
 );
 ```
+</core>
+</section>
 
+<section id="execution-processes-fix">
+<core>
 ## Step 5: Execution Session Processes Fix
 
 The execution session:
@@ -80,13 +123,19 @@ UPDATE orchestration_tasks
 SET state = 'working', last_heartbeat = datetime('now')
 WHERE task_id = 'task-05';
 ```
+</core>
+</section>
 
+<section id="resume-monitoring">
+<core>
 ## Step 6: Resume Monitoring
 
 Relaunch monitoring subagent. Execution session continues with remaining steps.
+</core>
+</section>
 
----
-
+<section id="alternative-complex-error">
+<core>
 ## Alternative: Complex Error (Retry 3+)
 
 If the error is more complex or recurring:
@@ -112,10 +161,12 @@ Prompt user: "Task-05 has failed 3 times with verification mismatch.
  3. Abort task: Mark as exited, handle manually later
  Which approach?"
 ```
+</core>
+</section>
 
----
-
-## Alternative: Context Exhaustion Warning (ADD-46)
+<section id="alternative-context-exhaustion">
+<core>
+## Alternative: Context Exhaustion Warning
 
 ### Execution Session Reports Context Warning
 
@@ -186,9 +237,11 @@ The continuation session:
 2. Checks current `state` and `last_error`
 3. Applies the fix proposal (if state = fix_proposed)
 4. Continues error recovery from where S1 left off
+</core>
+</section>
 
----
-
+<section id="alternative-terminal-error">
+<core>
 ## Alternative: Terminal Error (Retry 5)
 
 Execution session self-exits after 5th retry:
@@ -215,3 +268,7 @@ Options:
 Recommend: Option 3 — read the task instruction and error reports
 to understand if the verification pattern is wrong.
 ```
+</core>
+</section>
+
+</skill>

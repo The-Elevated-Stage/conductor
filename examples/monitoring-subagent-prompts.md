@@ -1,9 +1,31 @@
+<skill name="conductor-example-monitoring-subagent-prompts" version="2.0">
+
+<metadata>
+type: example
+parent-skill: conductor
+tier: 3
+</metadata>
+
+<sections>
+- launch-verification-watcher
+- main-monitoring-parallel
+- sequential-task-monitoring
+- staleness-only-monitoring
+- post-review-re-monitoring
+- monitoring-cycle-extras
+- design-decisions
+</sections>
+
+<section id="launch-verification-watcher">
+<core>
 # Example: Monitoring Subagent Prompts
 
 ## Launch Verification Watcher (Immediate Post-Launch)
 
 Launch before presenting musician prompts to the user, so monitoring is active when sessions start:
+</core>
 
+<template follow="format">
 ```python
 Task("Verify execution sessions launched successfully", prompt="""
 Verify that all execution sessions launched and claimed their tasks.
@@ -30,13 +52,17 @@ ORDER BY task_id;
 **Do not loop beyond 5 minutes.** Either verify success or report timeout.
 """, subagent_type="general-purpose", model="opus", run_in_background=True)
 ```
+</template>
+</section>
 
----
-
+<section id="main-monitoring-parallel">
+<core>
 ## Main Monitoring: Parallel Phase (Primary Use Case)
 
 Launch after Launch Verification Watcher confirms all tasks are `working`:
+</core>
 
+<template follow="format">
 ```python
 Task("Monitor Phase 2 execution tasks", prompt="""
 Monitor orchestration_tasks for state changes using comms-link query tool.
@@ -74,7 +100,11 @@ ORDER BY task_id;
 **EXIT IMMEDIATELY after reporting.** Do not continue monitoring. Do not loop. Do not send additional messages. The conductor will handle the event and relaunch a new monitoring subagent afterward.
 """, subagent_type="general-purpose", model="opus", run_in_background=True)
 ```
+</template>
+</section>
 
+<section id="sequential-task-monitoring">
+<core>
 ## Sequential Task Monitoring (Simpler)
 
 For sequential tasks, monitoring is simpler since only one task runs at a time:
@@ -92,7 +122,11 @@ Report back when state changes from 'working' to anything else.
 Include the new state and most recent message.
 """, subagent_type="general-purpose", model="opus", run_in_background=True)
 ```
+</core>
+</section>
 
+<section id="staleness-only-monitoring">
+<core>
 ## Staleness-Only Monitoring
 
 When all tasks are in stable states but need staleness detection:
@@ -112,7 +146,11 @@ Report back if any rows returned. Include task_id, state, and seconds_stale.
 If no stale sessions after 10 checks, report "All sessions healthy" and stop.
 """, subagent_type="general-purpose", model="opus", run_in_background=True)
 ```
+</core>
+</section>
 
+<section id="post-review-re-monitoring">
+<core>
 ## Post-Review Re-Monitoring
 
 After handling a review or error, relaunch monitoring for remaining active tasks:
@@ -127,8 +165,12 @@ Same criteria as before — report on needs_review, error, complete, exited, or 
 Also include task-03 in monitoring (it resumed after review).
 """, subagent_type="general-purpose", model="opus", run_in_background=True)
 ```
+</core>
+</section>
 
-## Monitoring Cycle: Conductor Heartbeat & Fallback Cleanup (ADD-41)
+<section id="monitoring-cycle-extras">
+<core>
+## Monitoring Cycle: Conductor Heartbeat & Fallback Cleanup
 
 Each monitoring cycle should include two additional steps:
 
@@ -141,9 +183,11 @@ UPDATE orchestration_tasks
 SET last_heartbeat = datetime('now')
 WHERE task_id = 'task-00';
 ```
+</core>
 
-This prevents musician sessions from timing out while waiting for conductor responses. Must be done every monitoring cycle (not just on events).
+<mandatory>This prevents musician sessions from timing out while waiting for conductor responses. Must be done every monitoring cycle (not just on events).</mandatory>
 
+<core>
 ### Fallback Row Cleanup
 
 Check for fallback rows (created when musician guard clause blocked a claim) and clean them up:
@@ -165,9 +209,11 @@ DELETE FROM orchestration_tasks WHERE task_id = 'fallback-{session_id}';
 ```
 
 Report any fallback collisions immediately to the conductor (rare case, indicates claim race condition).
+</core>
+</section>
 
----
-
+<section id="design-decisions">
+<mandatory>
 ## Key Design Decisions
 
 - **Model:** Always `model="opus"` — sonnet is the default and is insufficient for orchestration subagents
@@ -177,3 +223,7 @@ Report any fallback collisions immediately to the conductor (rare case, indicate
 - **Heartbeat refresh:** Every cycle, in-band, to keep conductor alive
 - **Fallback cleanup:** Every cycle, delete if original task has newer timestamp
 - **Relaunch pattern:** After each event handling, launch a new monitoring subagent
+</mandatory>
+</section>
+
+</skill>

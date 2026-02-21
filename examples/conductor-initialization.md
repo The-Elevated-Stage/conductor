@@ -1,3 +1,25 @@
+<skill name="conductor-example-initialization" version="2.0">
+
+<metadata>
+type: example
+parent-skill: conductor
+tier: 3
+</metadata>
+
+<sections>
+- scenario
+- read-plan
+- git-branch
+- verify-temp
+- load-readmes
+- load-memory
+- initialize-database
+- verify-hooks
+- user-approval-gate
+</sections>
+
+<section id="scenario">
+<context>
 # Example: Conductor Initialization
 
 This example shows the complete initialization workflow for a documentation reorganization plan.
@@ -8,7 +30,11 @@ Implementation plan: `docs/plans/2026-02-04-docs-reorganization.md`
 - Phase 1: Foundation task (sequential)
 - Phase 2: Extraction tasks 3-6 (parallel)
 - Phase 3: Migration tasks 7-10 (mixed)
+</context>
+</section>
 
+<section id="read-plan">
+<core>
 ## Step 1: Read Implementation Plan
 
 ```
@@ -21,7 +47,11 @@ Identify:
 - Phase 2: task-03 through task-06 (parallel-safe, independent extraction)
 - Phase 3: task-07 through task-10 (mixed — some parallel, some sequential)
 - Danger files: `knowledge-base/testing/README.md` shared by task-03 and task-04
+</core>
+</section>
 
+<section id="git-branch">
+<core>
 ## Step 2: Git Branch
 
 ```bash
@@ -36,13 +66,21 @@ git checkout -b feat/docs-reorganization
 git branch --show-current
 # Output: feat/docs-reorganization
 ```
+</core>
+</section>
 
+<section id="verify-temp">
+<core>
 ## Step 3: Verify temp/ Directory
 
 ```bash
 ls -la temp/ || mkdir -p temp/
 ```
+</core>
+</section>
 
+<section id="load-readmes">
+<core>
 ## Step 4: Load docs/ READMEs
 
 Read these 5 files (full reads, ~1-2k tokens total):
@@ -51,61 +89,25 @@ Read these 5 files (full reads, ~1-2k tokens total):
 - `docs/implementation/README.md`
 - `docs/implementation/proposals/README.md`
 - `docs/scratchpad/README.md`
+</core>
+</section>
 
+<section id="load-memory">
+<core>
 ## Step 5: Load Memory Graph
 
 Read the full knowledge graph via memory MCP `read_graph`. Review for project-wide decisions, rules, and RAG pointers relevant to this orchestration run.
+</core>
+</section>
 
-## Step 6: Initialize STATUS.md
-
-```markdown
-# STATUS.md — Documentation Reorganization
-
-## Conductor Info
-- **Session ID:** $CLAUDE_SESSION_ID (set by SessionStart hook)
-- **Branch:** feat/docs-reorganization
-- **Database:** comms.db (orchestration_tasks, orchestration_messages)
-- **Plan:** docs/plans/2026-02-04-docs-reorganization.md (LOCKED)
-
-## Phase Overview
-- Phase 1 (Foundation): task-01 — PENDING
-- Phase 2 (Extraction): task-03, task-04, task-05, task-06 — PENDING
-- Phase 3 (Migration): task-07, task-08, task-09, task-10 — PENDING
-
-### Task 1: Create Documentation Structure
-State: Pending | Type: Sequential | Phase: 1
-
-### Task 3: Extract Testing Docs
-State: Pending | Type: Parallel | Phase: 2
-⚠️ Danger Files: knowledge-base/testing/README.md (shared with Task 4)
-
-### Task 4: Extract API Docs
-State: Pending | Type: Parallel | Phase: 2
-⚠️ Danger Files: knowledge-base/testing/README.md (cross-references from Task 3)
-
-### Task 5: Extract Database Docs
-State: Pending | Type: Parallel | Phase: 2
-
-### Task 6: Extract Architecture Docs
-State: Pending | Type: Parallel | Phase: 2
-
-## Task Planning Notes
-(Empty — populated during execution)
-
-## Proposals Pending
-(None yet)
-
-## Recovery Instructions
-(Written before context exit)
-
-## Project Decisions Log
-- 2026-02-04 09:15: Plan locked. Branch created.
-```
-
-## Step 7: Initialize Database
+<section id="initialize-database">
+<core>
+## Step 6: Initialize Database
 
 Via comms-link execute:
+</core>
 
+<template follow="exact">
 ```sql
 DROP TABLE IF EXISTS orchestration_tasks;
 DROP TABLE IF EXISTS orchestration_messages;
@@ -144,14 +146,20 @@ CREATE TABLE orchestration_messages (
 INSERT INTO orchestration_tasks (task_id, state, last_heartbeat)
 VALUES ('task-00', 'watching', datetime('now'));
 ```
+</template>
 
+<core>
 Verify:
 ```sql
 SELECT * FROM orchestration_tasks;
 -- Expected: 1 row, task-00, state=watching
 ```
+</core>
+</section>
 
-## Step 8: Verify Hooks and Database
+<section id="verify-hooks">
+<core>
+## Step 7: Verify Hooks and Database
 
 Hooks self-configure via `hooks.json` preset detection. No manual setup.sh step needed.
 
@@ -169,16 +177,41 @@ test -f tools/implementation-hook/hooks.json && echo "hooks.json found"
 # Database is initialized and accessible
 test -f comms.db && echo "Database ready"
 ```
+</core>
 
+<context>
 **Expected behavior:** When conductor session starts, SessionStart hook automatically injects `$CLAUDE_SESSION_ID` into the system prompt (available as a value, not a bash env var). Stop hook (via preset) monitors session state and blocks exit until task is in terminal state.
+</context>
+</section>
 
-## Step 9: Lock Plan
+<section id="user-approval-gate">
+<core>
+## Step 8: User Approval Gate
 
-Plan is now frozen. Record in STATUS.md:
+Present the plan overview to the user (from Overview and Phase Summary sections read in Step 1):
+
 ```markdown
-## Project Decisions Log
-- 2026-02-04 09:15: Plan locked. Branch created.
-- 2026-02-04 09:16: Initialization complete. Database ready. Hook active.
+Ready to execute: Documentation Reorganization
+- 3 phases, 9 tasks
+- Phase 1: Foundation (sequential, 1 task)
+- Phase 2: Extraction (parallel, 4 tasks)
+- Phase 3: Migration (mixed, 4 tasks)
+- Danger files: knowledge-base/testing/README.md (shared by task-03 and task-04)
+
+Approve execution?
 ```
 
+After approval, set the plan tracking line in MEMORY.md:
+
+```markdown
+## Active Orchestration
+Current plan: docs/plans/2026-02-04-docs-reorganization.md
+```
+
+This is the last interactive gate. After this point, the Conductor operates fully autonomously.
+
 **Next:** Begin Phase 1 — create task instruction for task-01.
+</core>
+</section>
+
+</skill>

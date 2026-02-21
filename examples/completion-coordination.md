@@ -1,3 +1,27 @@
+<skill name="conductor-example-completion-coordination" version="2.0">
+
+<metadata>
+type: example
+parent-skill: conductor
+tier: 3
+</metadata>
+
+<sections>
+- scenario
+- verify-all-tasks
+- read-completion-reports
+- verify-deliverables
+- check-proposals
+- integrate-proposals
+- decisions-cleanup
+- prepare-pr
+- report-to-user
+- close-musician-windows
+- set-conductor-complete
+</sections>
+
+<section id="scenario">
+<context>
 # Example: Completion Coordination
 
 This example shows the final integration workflow after all tasks complete.
@@ -6,7 +30,11 @@ This example shows the final integration workflow after all tasks complete.
 
 All Phase 2 tasks (task-03 through task-06) have reached `complete` state.
 Phase 3 is also complete. All implementation tasks are done.
+</context>
+</section>
 
+<section id="verify-all-tasks">
+<core>
 ## Step 1: Verify All Tasks Complete
 
 ```sql
@@ -30,11 +58,19 @@ task-10 | complete | 2026-02-04 15:30 | docs/implementation/reports/task-10-comp
 ```
 
 If any task is `exited`, note it for the report but continue with integration.
+</core>
+</section>
 
+<section id="read-completion-reports">
+<core>
 ## Step 2: Read Completion Reports
 
 Read each report to compile deliverables list and identify any issues.
+</core>
+</section>
 
+<section id="verify-deliverables">
+<core>
 ## Step 3: Verify Deliverables
 
 ```bash
@@ -51,7 +87,7 @@ git status
 git diff --stat
 ```
 
-## Step 4: Run Final Verification
+### Run Final Verification
 
 ```bash
 # All tests passing (if applicable)
@@ -64,15 +100,16 @@ find docs/ -name "*.md" -newer docs/plans/2026-02-04-docs-reorganization.md
 # Verify no files in temp/ that should be elsewhere
 ls -la temp/
 ```
+</core>
+</section>
 
-## Step 5: Check for Proposals
+<section id="check-proposals">
+<core>
+## Step 4: Check for Proposals
 
 ```bash
 # General proposals
 ls -la docs/implementation/proposals/
-
-# Learnings proposals
-ls -la docs/proposals/claude-md/
 
 # Verify nothing stuck in temp/
 ls -la temp/*.md 2>/dev/null
@@ -83,8 +120,12 @@ Process each proposal:
 - **Memory snippets** — add to memory entities
 - **RAG patterns** — verify ingested
 - **Non-critical** — defer or note for follow-up
+</core>
+</section>
 
-## Step 6: Integrate Proposals
+<section id="integrate-proposals">
+<core>
+## Step 5: Integrate Proposals
 
 Example CLAUDE.md addition:
 ```markdown
@@ -97,22 +138,28 @@ Example memory entity:
 Pattern: Documentation extraction follows source→target mapping with cross-references.
 Anti-pattern: Don't create cross-references before target files exist.
 ```
+</core>
+</section>
 
-## Step 7: Ask About Human-Readable Docs
+<section id="decisions-cleanup">
+<core>
+## Step 6: Decisions Directory Cleanup
 
-```markdown
-Implementation complete. The following reference documentation could be
-generated from the RAG knowledge-base:
+```bash
+# Check for Repetiteur consultation journals
+ls docs/plans/designs/decisions/docs-reorganization/
 
-- reference/testing-guide.md (from knowledge-base/testing/)
-- reference/api-guide.md (from knowledge-base/api/)
-- reference/database-guide.md (from knowledge-base/database/)
-- reference/architecture-guide.md (from knowledge-base/architecture/)
-
-Generate consolidated guides now?
+# No consultations occurred — clean up the entire directory
+rm -rf docs/plans/designs/decisions/docs-reorganization/
 ```
 
-## Step 8: Prepare PR
+If Repetiteur consultations had occurred (journals present), preserve the directory for reference.
+</core>
+</section>
+
+<section id="prepare-pr">
+<core>
+## Step 7: Prepare PR
 
 ```bash
 # Review all commits
@@ -123,6 +170,9 @@ git diff main --stat
 ```
 
 Suggest PR:
+</core>
+
+<template follow="format">
 ```markdown
 **Title:** feat(docs): reorganize documentation into knowledge-base structure
 
@@ -144,9 +194,15 @@ Suggest PR:
 - [ ] No broken links in documentation
 - [ ] RAG ingestion successful for all files
 ```
+</template>
+</section>
 
-## Step 9: Report to User
+<section id="report-to-user">
+<core>
+## Step 8: Report to User
+</core>
 
+<template follow="format">
 ```markdown
 Implementation complete!
 
@@ -169,7 +225,30 @@ Implementation complete!
 
 Waiting for your feedback.
 ```
+</template>
+</section>
 
+<section id="close-musician-windows">
+<core>
+## Step 9: Close Musician Windows
+
+Close all remaining Musician kitty windows:
+
+```bash
+# For each task
+kill $(cat temp/musician-task-01.pid) 2>/dev/null
+rm -f temp/musician-task-01.pid
+kill $(cat temp/musician-task-03.pid) 2>/dev/null
+rm -f temp/musician-task-03.pid
+# ... repeat for task-04 through task-10
+```
+
+Return to SKILL.md and locate the Musician Lifecycle Protocol if any windows require special handling.
+</core>
+</section>
+
+<section id="set-conductor-complete">
+<core>
 ## Step 10: Set Conductor Complete
 
 ```sql
@@ -180,3 +259,7 @@ WHERE task_id = 'task-00';
 ```
 
 Hook detects `complete` state → session can now exit normally.
+</core>
+</section>
+
+</skill>

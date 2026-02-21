@@ -117,7 +117,7 @@ Detail: [relevant data]
 ## Anomaly Report Format
 
 <template follow="format">
-SENTINEL: {task-id}
+SENTINEL: [{timestamp}] {task-id}
 Anomaly: {type}
 Detail: {relevant data}
 </template>
@@ -126,21 +126,21 @@ Examples:
 
 **Self-correction detected:**
 ```
-SENTINEL: task-03
+SENTINEL: [14:32:07] task-03
 Anomaly: self-correction
 Detail: "step 2 self-correction: test failure in parser, rewrote tokenizer [ctx: 34%]"
 ```
 
 **Context spike:**
 ```
-SENTINEL: task-05
+SENTINEL: [14:35:22] task-05
 Anomaly: context-spike
 Detail: Context jumped from 29% to 51% between step 2 and step 3 (+22%)
 ```
 
 **Stalled progress:**
 ```
-SENTINEL: task-04
+SENTINEL: [14:41:03] task-04
 Anomaly: stalled
 Detail: No new entries in temp/task-04-status for 7 minutes. Last entry: "step 3 agent 1 launched [ctx: 41%]"
 ```
@@ -160,7 +160,6 @@ The Sentinel reads temp/ files whose format is defined by the Musician skill. Th
 **Files the Sentinel ignores:**
 - `temp/task-{NN}-HANDOFF` — written only on clean exit, not during active execution
 - `temp/musician-task-{NN}.pid` — PID tracking file, managed by the Conductor
-- `temp/musician-task-{NN}.session-id` — session ID tracking, managed by the Conductor
 
 The anomaly criteria depend on specific patterns in these files:
 - `self-correction` keyword in status entries

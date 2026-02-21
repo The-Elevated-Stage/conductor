@@ -14,12 +14,13 @@ protocol: Completion Protocol
 - verify-deliverables
 - check-proposals
 - integrate-proposals
+- decisions-cleanup
 - prepare-pr
 - report-to-user
+- close-musician-windows
 - set-conductor-complete
 - terminal-state-rules
 - smoothness-aggregation
-- decisions-cleanup
 </sections>
 
 <section id="completion-workflow">
@@ -36,7 +37,7 @@ When all tasks in all phases reach terminal state (`complete` or `exited`), exec
 6. Clean up the decisions directory
 7. Prepare PR (review commits, check for sensitive data)
 8. Report to user with deliverables and recommendations
-9. Close all remaining Musician kitty windows — proceed to Musician Lifecycle Protocol for cleanup
+9. Close all remaining Musician kitty windows — return to SKILL.md and locate the Musician Lifecycle Protocol for cleanup
 10. Set conductor state to `complete`
 
 <mandatory>Step 8 is the one point where the Conductor pauses for user input. The orchestration is complete — the user decides whether to merge, create PR, or adjust. All prior steps are autonomous.</mandatory>
@@ -133,9 +134,34 @@ Process each proposal by type:
 </core>
 </section>
 
+<section id="decisions-cleanup">
+<core>
+## Step 6: Decisions Directory Cleanup
+
+After the user confirms completion (merge or PR created), clean up the decisions directory used during planning:
+
+```bash
+# Remove the feature's decisions directory
+rm -rf docs/plans/designs/decisions/{feature-name}/
+```
+
+This directory contained:
+- Dramaturg journal
+- Arranger journal
+- Any Repetiteur consultation journals
+- Blocker reports
+
+These are planning artifacts that served their purpose. The implementation plan and its git history are the durable record.
+
+<guidance>
+If Repetiteur consultations occurred (journals exist in `decisions/{feature-name}/`), preserve the decision journals directory as reference. Otherwise, clean up the entire `decisions/{feature-name}/` directory to prevent accumulation across features.
+</guidance>
+</core>
+</section>
+
 <section id="prepare-pr">
 <core>
-## Step 6: Prepare PR
+## Step 7: Prepare PR
 
 ```bash
 # Review all commits on the feature branch
@@ -167,7 +193,7 @@ git diff main --stat
 
 <section id="report-to-user">
 <core>
-## Step 7: Report to User
+## Step 8: Report to User
 
 <mandatory>This is the one interactive gate in the completion flow. Present the report and wait for the user's decision on how to proceed (merge, PR, adjust).</mandatory>
 
@@ -193,9 +219,24 @@ Implementation complete.
 </core>
 </section>
 
+<section id="close-musician-windows">
+<core>
+## Step 9: Close Musician Windows
+
+Close all remaining Musician kitty windows. For each task, read the PID file and terminate:
+
+```bash
+kill $(cat temp/musician-{task-id}.pid) 2>/dev/null
+rm -f temp/musician-{task-id}.pid
+```
+
+Return to SKILL.md and locate the Musician Lifecycle Protocol for the full cleanup mechanics if any windows require special handling (crash recovery, stale PIDs).
+</core>
+</section>
+
 <section id="set-conductor-complete">
 <core>
-## Step 8: Set Conductor Complete
+## Step 10: Set Conductor Complete
 
 After user confirms PR or merge decision:
 
@@ -251,31 +292,6 @@ Interpretation:
 - Single outlier 7+: Task-specific issue, not a plan problem
 
 Include aggregated scores in the completion report to give the user visibility into execution quality.
-</guidance>
-</core>
-</section>
-
-<section id="decisions-cleanup">
-<core>
-## Decisions Directory Cleanup
-
-After the user confirms completion (merge or PR created), clean up the decisions directory used during planning:
-
-```bash
-# Remove the feature's decisions directory
-rm -rf docs/plans/designs/decisions/{feature-name}/
-```
-
-This directory contained:
-- Dramaturg journal
-- Arranger journal
-- Any Repetiteur consultation journals
-- Blocker reports
-
-These are planning artifacts that served their purpose. The implementation plan and its git history are the durable record.
-
-<guidance>
-If the user wants to preserve the journals for reference, ask before deleting. Otherwise, clean up to prevent directory accumulation across features.
 </guidance>
 </core>
 </section>

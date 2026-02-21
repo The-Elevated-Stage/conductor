@@ -342,7 +342,7 @@ Update `last_heartbeat` on EVERY state transition:
 ```sql
 UPDATE orchestration_tasks
 SET state = '{new_state}', last_heartbeat = datetime('now')
-WHERE task_id = '{task_id}';
+WHERE task_id = '{task-id}';
 ```
 
 All SQL in task instructions and conductor workflows MUST include `last_heartbeat = datetime('now')` alongside any `state` change. This enables staleness detection. Omitting the heartbeat from a state update is a bug.

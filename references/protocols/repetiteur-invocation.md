@@ -4,7 +4,7 @@
 type: reference
 parent-skill: conductor
 tier: 3
-protocol: Repetiteur Invocation Protocol
+protocol: Repetiteur Protocol
 </metadata>
 
 <sections>
@@ -326,7 +326,7 @@ After receiving the handoff message, execute these steps in order:
    - Close and clean up removed tasks
    - Create new task rows and launch for new tasks
 
-7. **Resume normal execution** — Proceed to Phase Execution Protocol for monitoring and coordination.
+7. **Resume normal execution** — Return to SKILL.md and locate the Phase Execution Protocol for monitoring and coordination.
 
 8. **Do NOT re-verify completed work** marked as unaffected. The Repetiteur's impact assessment already verified isolation.
 

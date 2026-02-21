@@ -596,6 +596,8 @@ During each monitoring cycle, the watcher refreshes the Conductor's own heartbea
 
 <mandatory>The monitoring watcher must refresh task-00 heartbeat on every poll cycle. If the Conductor has no watcher running, its heartbeat goes stale and Musicians will escalate unnecessarily.</mandatory>
 
+<mandatory>Do not re-process messages already handled in a previous monitoring cycle. Track processed message IDs in-session to prevent duplicate event handling.</mandatory>
+
 ### Manual Monitoring Fallback
 
 If the monitoring subagent repeatedly fails (3 retries exhausted), fall back to manual monitoring using the validation script:
@@ -762,6 +764,20 @@ DELETE FROM orchestration_tasks WHERE task_id = 'fallback-{session-id}';
 -- If original task's heartbeat <= fallback's: report to user (task may need re-launch)
 ```
 </template>
+### Staleness Detection
+
+<template follow="exact">
+```sql
+-- Staleness Detection (Pattern 13)
+SELECT task_id, state, last_heartbeat,
+  (julianday('now') - julianday(last_heartbeat)) * 86400 AS seconds_stale
+FROM orchestration_tasks
+WHERE state NOT IN ('complete', 'exited')
+  AND (julianday('now') - julianday(last_heartbeat)) * 86400 > 540;
+```
+</template>
+
+The 540-second (9-minute) threshold is the standard staleness boundary. Tasks exceeding this are considered potentially dead. Route stale tasks to the Error Recovery Protocol via SKILL.md for investigation.
 </core>
 </section>
 
@@ -774,7 +790,7 @@ Update `last_heartbeat` on EVERY state transition:
 ```sql
 UPDATE orchestration_tasks
 SET state = '{new_state}', last_heartbeat = datetime('now')
-WHERE task_id = '{task_id}';
+WHERE task_id = '{task-id}';
 ```
 
 All SQL in conductor workflows MUST include `last_heartbeat = datetime('now')` alongside any `state` change. Omitting the heartbeat from a state update is a bug.

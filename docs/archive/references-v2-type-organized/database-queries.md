@@ -1,13 +1,39 @@
+<skill name="conductor-database-queries" version="2.0">
+
+<metadata>
+type: reference
+parent-skill: conductor
+tier: 3
+</metadata>
+
+<sections>
+- database-location
+- schema-ddl
+- schema-verification
+- column-reference
+- common-sql-patterns
+- dynamic-row-management
+- old-table-names
+</sections>
+
+<section id="database-location">
+<core>
 # Database Queries Reference
 
 ## Database Location
 
 `/home/kyle/claude/remindly/comms.db` — shared by comms-link MCP server and stop hook (via sqlite3).
+</core>
+</section>
 
+<section id="schema-ddl">
+<core>
 ## Schema DDL
+</core>
 
-**IMPORTANT:** Use `comms-link execute` (raw SQL) for CREATE TABLE with CHECK constraints. The `create-table` tool does not support CHECK.
+<mandatory>Use `comms-link execute` (raw SQL) for CREATE TABLE with CHECK constraints. The `create-table` tool does not support CHECK.</mandatory>
 
+<template follow="exact">
 ```sql
 -- Drop existing tables (clean start for new implementation)
 DROP TABLE IF EXISTS orchestration_tasks;
@@ -55,7 +81,11 @@ CREATE INDEX idx_messages_task_time ON orchestration_messages(task_id, timestamp
 CREATE INDEX idx_messages_type ON orchestration_messages(message_type);
 CREATE INDEX idx_tasks_state_heartbeat ON orchestration_tasks(state, last_heartbeat);
 ```
+</template>
+</section>
 
+<section id="schema-verification">
+<core>
 ## Schema Verification
 
 ```sql
@@ -64,7 +94,11 @@ PRAGMA table_info(orchestration_messages);
 ```
 
 If columns are missing or tables don't exist: drop and recreate.
+</core>
+</section>
 
+<section id="column-reference">
+<core>
 ## Column Reference
 
 ### orchestration_tasks
@@ -93,18 +127,28 @@ If columns are missing or tables don't exist: drop and recreate.
 | `message` | TEXT | Free-text message content |
 | `message_type` | TEXT | Enum for filtering messages without parsing body |
 | `timestamp` | TEXT | Auto-set to CURRENT_TIMESTAMP |
+</core>
+</section>
 
+<section id="common-sql-patterns">
+<core>
 ## Common SQL Patterns
 
 ### Pattern 1: Insert Task Row (Conductor — Phase Launch)
+</core>
 
+<template follow="exact">
 ```sql
 INSERT INTO orchestration_tasks (task_id, state, instruction_path, last_heartbeat)
 VALUES ('task-03', 'watching', 'docs/tasks/task-03.md', datetime('now'));
 ```
+</template>
 
+<core>
 ### Pattern 2: Atomic Task Claim (Execution — Initialization)
+</core>
 
+<template follow="exact">
 ```sql
 UPDATE orchestration_tasks
 SET state = 'working',
@@ -116,11 +160,15 @@ SET state = 'working',
 WHERE task_id = 'task-03'
   AND state IN ('watching', 'fix_proposed', 'exit_requested');
 ```
+</template>
 
-Verify `rows_affected = 1`. If 0, guard blocked (create fallback row, notify conductor, exit cleanly).
+<mandatory>Verify `rows_affected = 1`. If 0, guard blocked (create fallback row, notify conductor, exit cleanly).</mandatory>
 
+<core>
 ### Pattern 3: Request Review (Execution)
+</core>
 
+<template follow="format">
 ```sql
 UPDATE orchestration_tasks
 SET state = 'needs_review', last_heartbeat = datetime('now')
@@ -145,9 +193,13 @@ INSERT INTO orchestration_messages (task_id, from_session, message, message_type
     'review_request'
 );
 ```
+</template>
 
+<core>
 ### Pattern 4: Approve Review (Conductor)
+</core>
 
+<template follow="format">
 ```sql
 UPDATE orchestration_tasks
 SET state = 'review_approved', last_heartbeat = datetime('now')
@@ -159,9 +211,13 @@ INSERT INTO orchestration_messages (task_id, from_session, message, message_type
     'approval'
 );
 ```
+</template>
 
+<core>
 ### Pattern 5: Reject Review (Conductor)
+</core>
 
+<template follow="format">
 ```sql
 UPDATE orchestration_tasks
 SET state = 'review_failed', last_heartbeat = datetime('now')
@@ -176,9 +232,13 @@ INSERT INTO orchestration_messages (task_id, from_session, message, message_type
     'rejection'
 );
 ```
+</template>
 
+<core>
 ### Pattern 6: Report Error (Execution)
+</core>
 
+<template follow="format">
 ```sql
 UPDATE orchestration_tasks
 SET state = 'error', last_heartbeat = datetime('now'),
@@ -198,9 +258,13 @@ INSERT INTO orchestration_messages (task_id, from_session, message, message_type
     'error'
 );
 ```
+</template>
 
+<core>
 ### Pattern 7: Propose Fix (Conductor)
+</core>
 
+<template follow="format">
 ```sql
 UPDATE orchestration_tasks
 SET state = 'fix_proposed', last_heartbeat = datetime('now')
@@ -215,9 +279,13 @@ INSERT INTO orchestration_messages (task_id, from_session, message, message_type
     'fix_proposal'
 );
 ```
+</template>
 
+<core>
 ### Pattern 8: Mark Complete (Execution)
+</core>
 
+<template follow="format">
 ```sql
 UPDATE orchestration_tasks
 SET state = 'complete', last_heartbeat = datetime('now'),
@@ -236,26 +304,38 @@ INSERT INTO orchestration_messages (task_id, from_session, message, message_type
     'completion'
 );
 ```
+</template>
 
+<core>
 ### Pattern 9: Request Exit (Conductor)
+</core>
 
+<template follow="exact">
 ```sql
 UPDATE orchestration_tasks
 SET state = 'exit_requested', last_heartbeat = datetime('now')
 WHERE task_id = 'task-00';
 ```
+</template>
 
+<core>
 ### Pattern 10: Mark Conductor Complete
+</core>
 
+<template follow="exact">
 ```sql
 UPDATE orchestration_tasks
 SET state = 'complete', last_heartbeat = datetime('now'),
     completed_at = datetime('now')
 WHERE task_id = 'task-00';
 ```
+</template>
 
+<core>
 ### Pattern 11: Monitor All Tasks
+</core>
 
+<template follow="exact">
 ```sql
 SELECT task_id, state, last_heartbeat,
        retry_count, last_error
@@ -263,9 +343,13 @@ FROM orchestration_tasks
 WHERE task_id != 'task-00'
 ORDER BY task_id;
 ```
+</template>
 
+<core>
 ### Pattern 12: Check for Pending Reviews/Messages
+</core>
 
+<template follow="exact">
 ```sql
 SELECT task_id, from_session, message, timestamp
 FROM orchestration_messages
@@ -273,9 +357,13 @@ WHERE task_id LIKE 'task-%'
 ORDER BY timestamp DESC
 LIMIT 10;
 ```
+</template>
 
+<core>
 ### Pattern 13: Staleness Detection
+</core>
 
+<template follow="exact">
 ```sql
 SELECT task_id, state,
        (julianday('now') - julianday(last_heartbeat)) * 86400 as seconds_stale
@@ -283,9 +371,13 @@ FROM orchestration_tasks
 WHERE state IN ('working', 'review_approved', 'review_failed', 'fix_proposed')
   AND (julianday('now') - julianday(last_heartbeat)) * 86400 > 540;
 ```
+</template>
 
+<core>
 ### Pattern 14: Insert Instruction Message
+</core>
 
+<template follow="exact">
 ```sql
 INSERT INTO orchestration_messages (task_id, from_session, message, message_type) VALUES (
     'task-03', 'task-00',
@@ -296,19 +388,29 @@ INSERT INTO orchestration_messages (task_id, from_session, message, message_type
     'instruction'
 );
 ```
+</template>
 
+<core>
 ### Pattern 15: Detect Context Warning
+</core>
 
+<template follow="exact">
 ```sql
 SELECT task_id, state, last_error
 FROM orchestration_tasks
 WHERE state = 'error' AND last_error = 'context_exhaustion_warning';
 ```
+</template>
 
+<context>
 When matched: Conductor evaluates context situation checklist (self-correction flag, deviations, checkpoint distance, agent estimates, prior warnings) and responds with `review_approved` (proceed with musician's proposal), `fix_proposed` (override scope), or `review_failed` (stop now, prepare handoff).
+</context>
 
+<core>
 ### Pattern 16: Emergency Broadcast
+</core>
 
+<template follow="exact">
 ```sql
 -- One message per task_id. Each musician's watcher monitors only its own task_id.
 INSERT INTO orchestration_messages (task_id, from_session, message, message_type) VALUES (
@@ -317,19 +419,31 @@ INSERT INTO orchestration_messages (task_id, from_session, message, message_type
     'emergency'
 );
 ```
+</template>
 
+<context>
 Conductor uses this for critical cross-cutting events (shared file conflicts, user-requested pause, etc.). One INSERT per task_id ensures each musician detects the message via its own task's message log.
+</context>
 
+<core>
 ### Pattern 17: Refresh Conductor Heartbeat
+</core>
 
+<template follow="exact">
 ```sql
 UPDATE orchestration_tasks SET last_heartbeat = datetime('now') WHERE task_id = 'task-00';
 ```
+</template>
 
+<context>
 Monitoring subagent refreshes this during its poll cycle. Conductor actions (review, error handling, phase transitions) also refresh it. Musicians check this heartbeat at 9-minute threshold — stale conductor heartbeat triggers timeout escalation.
+</context>
 
+<core>
 ### Pattern 18: Session Handoff (Context Exit)
+</core>
 
+<template follow="format">
 ```sql
 -- When musician exits for context exhaustion (clean exit, has HANDOFF doc)
 UPDATE orchestration_tasks
@@ -345,11 +459,17 @@ INSERT INTO orchestration_messages (task_id, from_session, message, message_type
     'handoff'
 );
 ```
+</template>
 
-See `references/session-handoff.md` for full handoff procedure (clean/dirty/crash types, high-context verification rule, worked_by succession, guard clause re-claiming).
+<reference path="skills_staged/conductor/references/session-handoff.md" load="recommended">
+Full handoff procedure (clean/dirty/crash types, high-context verification rule, worked_by succession, guard clause re-claiming).
+</reference>
 
+<core>
 ### Pattern 19: Detect and Cleanup Fallback Rows
+</core>
 
+<template follow="exact">
 ```sql
 -- Monitoring subagent periodically checks for fallback rows
 SELECT task_id, last_heartbeat, message
@@ -367,7 +487,11 @@ WHERE task_id LIKE 'fallback-%'
     WHERE t.last_heartbeat > f.last_heartbeat
   );
 ```
+</template>
+</section>
 
+<section id="dynamic-row-management">
+<core>
 ## Dynamic Row Management
 
 Tables persist across phases. Add rows as phases launch:
@@ -382,7 +506,11 @@ Phase 3 launches: + [task-07, task-08, ...]
 ```
 
 No table rebuild between phases — just INSERT new rows.
+</core>
+</section>
 
+<section id="old-table-names">
+<mandatory>
 ## Old Table Names (NEVER USE)
 
 | Old Name | New Name |
@@ -392,3 +520,7 @@ No table rebuild between phases — just INSERT new rows.
 | `task_messages` | `orchestration_messages` |
 | `status` column | `state` column |
 | `coordination.db` | `comms.db` |
+</mandatory>
+</section>
+
+</skill>

@@ -1,11 +1,34 @@
+<skill name="conductor-recovery-instructions-template" version="2.0">
+
+<metadata>
+type: reference
+parent-skill: conductor
+tier: 3
+</metadata>
+
+<sections>
+- overview
+- format
+- key-sections
+- principles
+</sections>
+
+<section id="overview">
+<context>
 # Recovery Instructions Template
 
 Use this simple format when exiting the conductor session due to context management (step 3 in Context Management section).
 
 Record these in STATUS.md under "Recovery Instructions" section for the resuming conductor session.
+</context>
+</section>
 
+<section id="format">
+<core>
 ## Format
+</core>
 
+<template follow="format">
 ```markdown
 ## Recovery Instructions
 
@@ -37,7 +60,11 @@ Record these in STATUS.md under "Recovery Instructions" section for the resuming
 - No pending reviews or errors
 - No RAG processing in progress
 ```
+</template>
+</section>
 
+<section id="key-sections">
+<core>
 ## Key Sections
 
 | Section | Purpose |
@@ -48,7 +75,11 @@ Record these in STATUS.md under "Recovery Instructions" section for the resuming
 | **Active tasks** | Current state of all tasks (helps resuming session know what to monitor) |
 | **Next action** | Specific, detailed instruction for resuming session (don't make it guess) |
 | **Additional context** | Any notes that help resuming session understand the situation |
+</core>
+</section>
 
+<section id="principles">
+<guidance>
 ## Principles
 
 - **Keep it concise:** Recovery instructions are read once, not referenced repeatedly
@@ -56,3 +87,7 @@ Record these in STATUS.md under "Recovery Instructions" section for the resuming
 - **List all tasks:** Resuming session needs full picture of what's happening
 - **Record heartbeat timestamps if critical:** If a session is about to hit heartbeat timeout, note it
 - **Mark anything urgent:** If resuming session needs to act immediately (e.g., retry a claim collision), say so clearly
+</guidance>
+</section>
+
+</skill>

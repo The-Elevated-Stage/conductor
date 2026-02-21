@@ -1,16 +1,40 @@
+<skill name="conductor-danger-files-governance" version="2.0">
+
+<metadata>
+type: reference
+parent-skill: conductor
+tier: 3
+</metadata>
+
+<sections>
+- definition
+- governance-flow
+- mitigation-patterns
+- reporting-format
+- skip-conditions
+</sections>
+
+<section id="definition">
+<core>
 # Danger Files Governance
 
 ## Definition
 
 Danger files are files that MAY be modified by 2+ parallel execution sessions. They represent potential write-write conflicts that could cause merge failures or data loss.
+</core>
 
+<context>
 ## Examples
 
 - Barrel export files (e.g., `src/components/index.ts`)
 - Shared configuration files (e.g., `pubspec.yaml`, `package.json`)
 - Documentation index files (e.g., `docs/knowledge-base/testing/README.md`)
 - Database migration files that multiple tasks might touch
+</context>
+</section>
 
+<section id="governance-flow">
+<core>
 ## 3-Step Governance Flow
 
 ### Step 1: Implementation Plan (Human Decision)
@@ -80,7 +104,11 @@ If conflict at merge: Task 4's additions take priority for cross-references.
 ```
 
 The subagent writes this coordination logic directly into the task instruction files.
+</core>
+</section>
 
+<section id="mitigation-patterns">
+<core>
 ## Mitigation Patterns
 
 ### Pattern 1: Ordering Within Tasks
@@ -109,11 +137,17 @@ Tasks report their modifications as proposals. Conductor applies all modificatio
 Move only the danger file modification to a sequential sub-step:
 - Tasks 3-6 run in parallel for all non-shared work
 - After all complete, conductor runs a single sequential step to merge shared file changes
+</core>
+</section>
 
+<section id="reporting-format">
+<core>
 ## Reporting Format
 
 Execution sessions report danger file interactions via messages:
+</core>
 
+<template follow="format">
 ```sql
 INSERT INTO orchestration_messages (task_id, from_session, message, message_type) VALUES (
     'task-03', '$CLAUDE_SESSION_ID',
@@ -125,9 +159,17 @@ INSERT INTO orchestration_messages (task_id, from_session, message, message_type
     'instruction'
 );
 ```
+</template>
+</section>
 
+<section id="skip-conditions">
+<core>
 ## When to Skip Danger File Analysis
 
 - All tasks in phase are fully independent (no shared files)
 - Phase has only 1 task (sequential)
 - Shared files are read-only for all tasks in phase
+</core>
+</section>
+
+</skill>

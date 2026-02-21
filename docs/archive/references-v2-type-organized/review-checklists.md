@@ -1,3 +1,21 @@
+<skill name="conductor-review-checklists" version="2.0">
+
+<metadata>
+type: reference
+parent-skill: conductor
+tier: 3
+</metadata>
+
+<sections>
+- checklist-overview
+- subagent-self-review
+- conductor-review
+- execution-task-completion-review
+- status-md-template
+</sections>
+
+<section id="checklist-overview">
+<core>
 # Review Checklists
 
 Three review checklists serve different purposes at different points in the orchestration lifecycle. Apply the correct checklist for the context.
@@ -9,7 +27,11 @@ Three review checklists serve different purposes at different points in the orch
 | Subagent Self-Review (FACTS) | Task instruction subagent | Before returning instructions to conductor | Catch factual errors in generated instructions |
 | Conductor Review (STRATEGY) | Conductor | After receiving task instructions from subagent | Catch strategic misalignments with plan goals |
 | Execution Task Completion | Conductor | When execution session submits `needs_review` or `complete` | Evaluate quality and decide approve/reject |
+</core>
+</section>
 
+<section id="subagent-self-review">
+<core>
 ## Subagent Self-Review Checklist (FACTS Focus)
 
 The task instruction creation subagent runs this checklist before returning results. Focus is on **factual correctness** — does the instruction file contain everything needed for autonomous execution?
@@ -26,7 +48,11 @@ The task instruction creation subagent runs this checklist before returning resu
 ### How to Use
 
 Run through all 8 items sequentially. If any item fails, fix the instruction file before returning to conductor. The validation script (`validate-instruction.sh`) catches some of these automatically, but not strategic issues like dependency accuracy or path correctness.
+</core>
+</section>
 
+<section id="conductor-review">
+<core>
 ## Conductor Review Checklist (STRATEGY Focus)
 
 The conductor runs this checklist after receiving task instructions from the subagent. Focus is on **strategic alignment** — do these instructions achieve what the plan intends?
@@ -40,9 +66,15 @@ The conductor runs this checklist after receiving task instructions from the sub
 7. **Integration with other tasks considered?** — For parallel tasks: danger file mitigations present. For sequential tasks: output from previous task used as input where needed. Cross-references to other tasks are accurate.
 
 ### How to Use
+</core>
 
+<guidance>
 Review items 1, 2, and 3 first — these catch the highest-impact issues. Items 4-7 are refinements. If items 1-3 pass but 4-7 have minor issues, approve with notes rather than rejecting.
+</guidance>
+</section>
 
+<section id="execution-task-completion-review">
+<core>
 ## Execution Task Completion Review
 
 When an execution session sets state to `needs_review` or `complete`, the conductor evaluates using the **smoothness scale (0-9)**.
@@ -99,7 +131,9 @@ Phase 2 Smoothness Summary:
   Average: 2.5/9
   Worst: 4/9
 ```
+</core>
 
+<guidance>
 **Interpretation guidelines:**
 - **Average 0-3:** Plan and instructions are high quality. Proceed confidently.
 - **Average 3-5:** Plan is adequate but instructions could be more precise. Note patterns for future improvement.
@@ -107,13 +141,17 @@ Phase 2 Smoothness Summary:
 - **Single outlier 7+:** Task-specific issue, not systemic. Investigate that task independently.
 
 Include aggregated scores in the final completion report to the user. This helps assess orchestration quality over time.
+</guidance>
+</section>
 
----
-
+<section id="status-md-template">
+<core>
 ## STATUS.md Template (Conductor Session Log)
 
 Create a persistent STATUS.md at the project root to track orchestration progress:
+</core>
 
+<template follow="format">
 ```markdown
 # Orchestration Status — [YYYY-MM-DD HH:MM]
 
@@ -133,12 +171,12 @@ Create a persistent STATUS.md at the project root to track orchestration progres
 ## Phases
 
 ### Phase 1 (Sequential): Foundation
-- Status: ✅ Complete
+- Status: Complete
 - Tasks: task-01, task-02
 - Completion: 2026-02-04 10:30 UTC
 
 ### Phase 2 (Parallel): Knowledge Extraction
-- Status: 🔄 In Progress (ETA: 2026-02-05 14:00)
+- Status: In Progress (ETA: 2026-02-05 14:00)
 - Tasks: task-03, task-04, task-05, task-06
 - Started: 2026-02-04 14:15 UTC
 
@@ -161,5 +199,11 @@ Create a persistent STATUS.md at the project root to track orchestration progres
 3. Conductor sets task state to `fix_proposed`
 4. User launches replacement musician: `claude "Resume task-{NN}..."`
 ```
+</template>
 
+<guidance>
 Keep STATUS.md updated during monitoring cycles. Include session ID (`$CLAUDE_SESSION_ID` from system prompt) for resumption tracking.
+</guidance>
+</section>
+
+</skill>

@@ -1,11 +1,30 @@
+<skill name="conductor-subagent-prompt-template" version="2.0">
+
+<metadata>
+type: reference
+parent-skill: conductor
+tier: 3
+</metadata>
+
+<sections>
+- overview
+- template
+- conductor-usage
+- pre-fetching-rag
+</sections>
+
+<section id="overview">
+<context>
 # Subagent Prompt Template — Task Instruction Creation
 
 This template is used by the conductor to construct the `prompt` parameter when launching a Task subagent to create task instruction files for a phase.
 
 The conductor fills in all `{{placeholders}}` before passing to the Task tool.
+</context>
+</section>
 
----
-
+<section id="template">
+<core>
 ## Template
 
 ### Step 1: Prepare Overrides & Learnings
@@ -15,7 +34,9 @@ Before launching the subagent, the conductor reviews the implementation plan for
 If there are no overrides, write "None — follow the implementation plan as written."
 
 ### Step 2: Launch Subagent
+</core>
 
+<template follow="format">
 ```
 Task("Create task instructions for Phase {{PHASE_NUMBER}}", prompt="""
 
@@ -55,7 +76,7 @@ Before returning, verify every instruction file:
 Verify each instruction file before returning:
 1. **Plan coverage:** Does instruction cover all objectives from implementation plan for this task? No missing steps.
 2. **Step clarity:** Each step is unambiguous — execution session can proceed without judgment calls.
-3. **Safety flags:** Dangerous operations (force-push, destructive db changes) are explicitly marked with ⚠️ WARNING.
+3. **Safety flags:** Dangerous operations (force-push, destructive db changes) are explicitly marked with WARNING.
 4. **Template compliance:** All sections from the selected template are present. Inapplicable sections marked N/A with reason, not omitted.
 5. **Checkpoint quality:** Checkpoints are after significant deliverables, not arbitrary steps. One per 3-5 substantive steps.
 
@@ -70,9 +91,11 @@ When instruction includes checkpoints (parallel tasks or mid-task reviews):
 
 """, model="opus", run_in_background=False)
 ```
+</template>
+</section>
 
----
-
+<section id="conductor-usage">
+<core>
 ## Conductor Usage
 
 ### Before Launch — Prepare Overrides & Learnings
@@ -109,7 +132,11 @@ The conductor reviews returned files from in-memory context (not re-reading the 
 3. Spot-check: instructions align with plan goals, appropriate task type, reasonable checkpoints
 4. If issues found: prompt subagent with specific correction ("Missing X, check plan section Y")
 5. Iteration limits: 2 loops max for same issue, 5 total reviews per instruction
+</core>
+</section>
 
+<section id="pre-fetching-rag">
+<guidance>
 ### Pre-Fetching RAG Results (Optional)
 
 For complex phases, the conductor can pre-fetch RAG results and include them in the prompt:
@@ -121,3 +148,7 @@ rag_results = query_documents("SQL patterns coordination database queries templa
 ```
 
 This reduces the subagent's need for independent RAG queries, saving context budget.
+</guidance>
+</section>
+
+</skill>

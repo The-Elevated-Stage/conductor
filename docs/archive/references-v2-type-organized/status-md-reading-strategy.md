@@ -1,15 +1,39 @@
+<skill name="conductor-status-md-reading-strategy" version="2.0">
+
+<metadata>
+type: reference
+parent-skill: conductor
+tier: 3
+</metadata>
+
+<sections>
+- problem
+- tiered-reading
+- decision-flowchart
+- status-md-structure
+- token-budget-impact
+</sections>
+
+<section id="problem">
+<context>
 # STATUS.md Reading Strategy
 
 ## Problem
 
 If the conductor reads full STATUS.md on every checkpoint (5+ sessions x 4 checkpoints), that's 60-100k tokens wasted on redundant reads.
+</context>
+</section>
 
+<section id="tiered-reading">
+<core>
 ## Solution: Tiered Reading
 
 ### Tier 1: Database Queries (Frequent — Every Check)
 
 For real-time state checks, query the database directly:
+</core>
 
+<template follow="exact">
 ```sql
 SELECT task_id, state, last_heartbeat,
        (julianday('now') - julianday(last_heartbeat)) * 86400 as seconds_stale
@@ -17,7 +41,9 @@ FROM orchestration_tasks
 WHERE task_id IN ('task-03', 'task-04', 'task-05', 'task-06')
 ORDER BY task_id;
 ```
+</template>
 
+<core>
 **When:** Every monitoring cycle, before/after reviews, error handling.
 **Cost:** Near zero (database query, not file read).
 **Returns:** Real-time state, heartbeat freshness, retry counts.
@@ -45,7 +71,11 @@ Read the entire STATUS.md file:
 - **Phase transitions** — When moving from one phase to the next (optional, Tier 1 + Tier 2 often suffice)
 
 **Cost:** ~2-5k tokens (one-time per occasion).
+</core>
+</section>
 
+<section id="decision-flowchart">
+<core>
 ## Decision Flowchart
 
 ```
@@ -58,7 +88,11 @@ Need task narrative (what was done, conductor notes)?
 Starting new session or completing orchestration?
   → Tier 3: Full STATUS.md read
 ```
+</core>
+</section>
 
+<section id="status-md-structure">
+<core>
 ## STATUS.md Structure (For Partial Reads)
 
 STATUS.md follows a predictable structure:
@@ -96,7 +130,11 @@ STATUS.md follows a predictable structure:
 ```
 
 Task sections (### Task N:) are the primary targets for Tier 2 partial reads.
+</core>
+</section>
 
+<section id="token-budget-impact">
+<context>
 ## Token Budget Impact
 
 | Scenario | Without Strategy | With Strategy |
@@ -106,3 +144,7 @@ Task sections (### Task N:) are the primary targets for Tier 2 partial reads.
 | Full orchestration (3 phases) | 30+ full reads = 60-150k tokens | 30 DB queries + 30 partial reads + 3 full reads = 21-45k tokens |
 
 **Savings:** 50-70% reduction in context consumed by STATUS.md reads.
+</context>
+</section>
+
+</skill>

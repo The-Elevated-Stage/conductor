@@ -1,3 +1,26 @@
+<skill name="conductor-rag-query-guide" version="2.0">
+
+<metadata>
+type: reference
+parent-skill: conductor
+tier: 3
+</metadata>
+
+<sections>
+- overview
+- conductor-queries
+- execution-queries
+- infrastructure-queries
+- template-queries
+- decision-workflow-queries
+- overlap-detection-queries
+- query-tips
+- recommended-workflow
+- file-to-query-map
+</sections>
+
+<section id="overview">
+<core>
 # RAG Query Guide for Orchestration
 
 ## Overview
@@ -5,7 +28,11 @@
 18 comprehensive RAG files (13,471 lines) are ingested in the local-rag MCP server, covering all aspects of autonomous parallel orchestration.
 
 **Score interpretation:** < 0.3 = good match, 0.3-0.5 = moderate, > 0.5 = refine query.
+</core>
+</section>
 
+<section id="conductor-queries">
+<core>
 ## Quick Reference: Query by Need
 
 ### Conductor Queries
@@ -20,7 +47,11 @@
 | Completion workflow | `conductor completion detection integration verification final state` |
 | Context monitoring | `conductor context budget runtime token tracking smoothness scale` |
 | Conductor state machine | `conductor state transitions state machine exit criteria custom hooks` |
+</core>
+</section>
 
+<section id="execution-queries">
+<core>
 ### Execution Queries
 
 | Need | Query |
@@ -30,7 +61,11 @@
 | Error reporting | `execution error reporting structured template retry logic terminal error` |
 | Execution state machine | `execution session states state machine transitions lifecycle custom hooks` |
 | Step patterns | `execution step patterns verification completion criteria completion report` |
+</core>
+</section>
 
+<section id="infrastructure-queries">
+<core>
 ### Infrastructure Queries
 
 | Need | Query |
@@ -39,7 +74,11 @@
 | State machine schema | `state machine database schema all states CHECK constraints single table orchestration_tasks` |
 | Session isolation | `session isolation atomic claim crash recovery session ID naming convention` |
 | Hook configuration | `custom hook setup implementation-hook preset configuration exit criteria` |
+</core>
+</section>
 
+<section id="template-queries">
+<core>
 ### Template Queries
 
 | Need | Query |
@@ -48,7 +87,11 @@
 | Error report template | `error report template structured format examples retry count stack trace` |
 | Completion report template | `completion report template structure sections verification results context budget` |
 | Bash scripts | `bash scripts session ID generation database queries hook activation` |
+</core>
+</section>
 
+<section id="decision-workflow-queries">
+<core>
 ### Decision & Workflow Queries
 
 | Need | Query |
@@ -58,7 +101,11 @@
 | Pattern selection | `when to use autonomous parallel orchestration vs sequential vs subagent-driven` |
 | Anti-patterns | `anti-patterns learnings mistakes to avoid best practices autonomous orchestration` |
 | Danger files | `danger files protocol shared resources barrel exports coordination batching` |
+</core>
+</section>
 
+<section id="overlap-detection-queries">
+<core>
 ### Overlap Detection Queries
 
 Used by the overlap-check subagent during RAG proposal processing. These queries help identify existing knowledge-base content that may overlap with a proposed RAG addition.
@@ -75,9 +122,15 @@ Used by the overlap-check subagent during RAG proposal processing. These queries
 - **0.3-0.4:** Moderate overlap — related content exists. Include in review with merge recommendation.
 - **0.4-0.5:** Weak overlap — tangentially related. Note but recommend approving as new file.
 - **> 0.5:** No meaningful overlap. Safe to ingest as new file.
+</core>
 
+<context>
 **Important:** The musician pre-screens at 0.4 threshold and includes matches in the proposal. The overlap subagent uses these as a head start but must query at 0.5 to catch the 0.4-0.5 band the musician missed.
+</context>
+</section>
 
+<section id="query-tips">
+<guidance>
 ## Query Tips
 
 1. **Include role** — `conductor error handling` not just `error handling`
@@ -85,7 +138,11 @@ Used by the overlap-check subagent during RAG proposal processing. These queries
 3. **Specify document type** — `SQL patterns templates` not just `patterns`
 4. **Use technical terms** — `CHECK constraints state enumeration` not just `database validation`
 5. **Query for examples** — `example TypeError error report stack trace` not just `error report format`
+</guidance>
+</section>
 
+<section id="recommended-workflow">
+<guidance>
 ## Recommended Workflow
 
 For task instruction creation:
@@ -100,7 +157,11 @@ For task instruction creation:
 8. State machine (transitions, terminal states)
 9. Quality standards (smoothness scale)
 10. Assemble into instruction file
+</guidance>
+</section>
 
+<section id="file-to-query-map">
+<core>
 ## File-to-Query Map
 
 | File | Query |
@@ -122,3 +183,7 @@ For task instruction creation:
 | `autonomous-orchestration-setup-initialization-complete.md` | `database setup initialization DDL complete all tables` |
 | `autonomous-orchestration-workflow-decision-trees-complete.md` | `workflow phases decision trees parallelization matrix` |
 | `autonomous-orchestration-templates-complete.md` | `SQL patterns templates error report completion report` |
+</core>
+</section>
+
+</skill>

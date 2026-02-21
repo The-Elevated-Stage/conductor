@@ -1,6 +1,21 @@
-# Orchestration Principles
+<skill name="conductor-orchestration-principles" version="2.0">
 
-Core principles that guide conductor behavior. Understanding these prevents common mistakes and enables efficient multi-task coordination.
+<metadata>
+type: reference
+parent-skill: conductor
+tier: 3
+</metadata>
+
+<sections>
+- context-headroom
+- external-sessions-vs-subagents
+- delegation-patterns
+- overload-signs
+</sections>
+
+<section id="context-headroom">
+<core>
+# Orchestration Principles
 
 ## Context Headroom is Valuable
 
@@ -38,13 +53,21 @@ Typical context costs per conductor action:
 | Error analysis | 3-8k tokens per error | Per error |
 | Database query results | 0.5-1k tokens | Frequent |
 | Monitoring subagent launch | 0.5k tokens | Per relaunch |
+</core>
 
+<context>
 For a 10-task orchestration with 2 phases: expect 40-80k tokens of conductor context usage, leaving 120-160k tokens of headroom for unexpected events.
+</context>
+</section>
 
+<section id="external-sessions-vs-subagents">
+<mandatory>
 ## External Sessions Are Not Subagents
 
 This distinction is the most common source of confusion. Confusing these breaks the orchestration model.
+</mandatory>
 
+<core>
 ### External Execution Sessions (Tier 1)
 
 - Full Claude Code sessions launched in **separate kitty windows** by the conductor via the Bash tool
@@ -86,7 +109,11 @@ This distinction is the most common source of confusion. Confusing these breaks 
 | Persistent state | Via database | None (ephemeral) |
 | Exit control | Hook-based (`complete`/`exited`) | Returns to parent |
 | Who launches | Conductor (via kitty + Bash tool) | Conductor or Tier 1 session |
+</core>
+</section>
 
+<section id="delegation-patterns">
+<core>
 ## Delegation Patterns
 
 ### What the Conductor Keeps
@@ -115,7 +142,9 @@ This distinction is the most common source of confusion. Confusing these breaks 
 - Self-review and checkpoint reporting
 
 ### Anti-Patterns
+</core>
 
+<guidance>
 **Conductor doing implementation work:**
 The conductor should never write code, create documentation files, or run tests directly. This consumes context that should be reserved for coordination.
 
@@ -124,7 +153,11 @@ Subagents lack the full Claude Code environment needed for complex multi-step im
 
 **External session for monitoring:**
 External sessions are expensive (200k context each) and user-launched. Don't use them for simple polling tasks that subagents handle well.
+</guidance>
+</section>
 
+<section id="overload-signs">
+<core>
 ## Signs the Conductor is Overloaded
 
 Watch for these indicators and take corrective action.
@@ -149,3 +182,7 @@ Watch for these indicators and take corrective action.
 | Re-reading same files | Write summaries to Task Planning Notes, reference notes instead |
 | Subagent failures accumulating | Fall back to manual monitoring with `validate-coordination.sh` |
 | User unresponsive to escalation | Pause orchestration, set conductor to `exit_requested` with clear resumption instructions |
+</core>
+</section>
+
+</skill>

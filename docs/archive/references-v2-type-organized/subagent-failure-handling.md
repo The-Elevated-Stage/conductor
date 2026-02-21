@@ -1,7 +1,30 @@
+<skill name="conductor-subagent-failure-handling" version="2.0">
+
+<metadata>
+type: reference
+parent-skill: conductor
+tier: 3
+</metadata>
+
+<sections>
+- scope
+- retry-policy
+- failure-categories
+- retry-decision-flowchart
+- escalation-to-user
+- integration-with-workflow
+</sections>
+
+<section id="scope">
+<context>
 # Subagent Failure Handling
 
 This reference covers failures of **conductor subagents** (task instruction creation, monitoring) — NOT execution session errors. For execution session error handling, see SKILL.md Error Handling section and `examples/error-recovery-workflow.md`.
+</context>
+</section>
 
+<section id="retry-policy">
+<core>
 ## Retry Policy
 
 **3 retries maximum** with the same prompt and inputs. After 3 failures, escalate to user.
@@ -15,7 +38,11 @@ Attempt 3: Relaunch with same prompt (last automatic retry)
   ↓ failure
 Escalate: Present all 3 error messages to user with options
 ```
+</core>
+</section>
 
+<section id="failure-categories">
+<core>
 ## Failure Categories
 
 Classify each failure to determine whether retrying is worthwhile.
@@ -77,7 +104,11 @@ Attempt 2: Same issue — subagent ignores task type parameter
 Assessment: Systemic — prompt template or skill may need fixing
 Action: Escalate immediately (don't waste attempt 3)
 ```
+</core>
+</section>
 
+<section id="retry-decision-flowchart">
+<core>
 ## Retry Decision Flowchart
 
 ```
@@ -101,13 +132,19 @@ Subagent failed
   │
   └─ Systemic failure ──→ Escalate to user (skip remaining retries)
 ```
+</core>
+</section>
 
+<section id="escalation-to-user">
+<core>
 ## Escalation to User
 
 When escalating, provide structured information so the user can make an informed decision.
 
 ### Escalation Message Format
+</core>
 
+<template follow="format">
 ```
 Subagent failed [N] times creating [WHAT].
 
@@ -126,7 +163,9 @@ Options:
 
 Recommendation: [which option and why]
 ```
+</template>
 
+<core>
 ### Example Escalation Messages
 
 **Task instruction creation failure:**
@@ -169,7 +208,11 @@ Options:
 Recommendation: Option 2. Manual monitoring via validate-coordination.sh
 is reliable. Resume subagent monitoring when next phase starts.
 ```
+</core>
+</section>
 
+<section id="integration-with-workflow">
+<core>
 ## Integration with Conductor Workflow
 
 ### During Phase Planning (Task Instruction Creation)
@@ -198,7 +241,9 @@ is reliable. Resume subagent monitoring when next phase starts.
 ```
 
 ### Tracking Retries
+</core>
 
+<guidance>
 Record retry attempts in STATUS.md Task Planning Notes:
 
 ```markdown
@@ -208,3 +253,7 @@ Record retry attempts in STATUS.md Task Planning Notes:
 ```
 
 This provides context for resuming sessions and diagnosing patterns across orchestrations.
+</guidance>
+</section>
+
+</skill>

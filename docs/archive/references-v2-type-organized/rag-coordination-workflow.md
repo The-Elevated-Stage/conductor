@@ -1,3 +1,22 @@
+<skill name="conductor-rag-coordination-workflow" version="2.0">
+
+<metadata>
+type: reference
+parent-skill: conductor
+tier: 3
+</metadata>
+
+<sections>
+- overview
+- interruption-handling
+- full-workflow
+- handling-interruptions-during-processing
+- resumption-after-exit
+- design-principles
+</sections>
+
+<section id="overview">
+<context>
 # RAG Coordination Workflow
 
 This document describes the complete RAG processing workflow, including how the conductor coordinates two subagents (overlap-check and ingestion) and handles interruptions from incoming task events.
@@ -14,10 +33,14 @@ The workflow involves three distinct phases:
 1. **Overlap-check phase:** Review proposals for existing KB overlap (subagent)
 2. **Decision phase:** Conductor reviews subagent results with user, makes merge/approve/reject decisions
 3. **Ingestion phase:** Write new files, perform merges, ingest into RAG (subagent)
+</context>
+</section>
 
+<section id="interruption-handling">
+<mandatory>
 ## Interruption Handling
 
-**Critical:** The background message-watcher runs continuously during all RAG phases. If an event arrives (task state change):
+The background message-watcher runs continuously during all RAG phases. If an event arrives (task state change):
 
 1. **Watcher detects event** → exits background task and notifies conductor
 2. **Conductor is unblocked** (was waiting for user input during review decision)
@@ -27,7 +50,11 @@ The workflow involves three distinct phases:
    - **Handle task:** Conductor processes review/error/completion, returns to RAG
    - **Continue RAG:** Conductor resumes RAG where it left off
 6. **If RAG was interrupted mid-decision:** Record decisions-so-far in STATUS.md "Pending RAG Processing" section so resuming session can continue later
+</mandatory>
+</section>
 
+<section id="full-workflow">
+<core>
 ## Full Workflow
 
 ### Step 1: Launch Overlap-Check Subagent
@@ -41,6 +68,9 @@ WHERE task_id = 'task-XX' AND type = 'rag-addition';
 ```
 
 **Launch subagent:**
+</core>
+
+<template follow="format">
 ```
 Task("Review RAG proposals for overlap", prompt="""
 Your role: Review RAG addition proposals for overlap with existing knowledge-base content.
@@ -92,7 +122,9 @@ Write results to `temp/rag-review-task-XX.md`:
 Task ID: task-XX
 """, model="opus", run_in_background=False)
 ```
+</template>
 
+<core>
 ### Step 2: Read Subagent Results
 
 Read `temp/rag-review-{task-id}.md` to understand:
@@ -122,7 +154,9 @@ For each merge decision, conductor edits the target knowledge-base file in place
 ### Step 5: Write Ingestion Manifest
 
 Create `docs/implementation/reports/rag-ingest-manifest-{task-id}.md`:
+</core>
 
+<template follow="format">
 ```markdown
 # RAG Ingestion Manifest — task-XX
 
@@ -136,11 +170,15 @@ Create `docs/implementation/reports/rag-ingest-manifest-{task-id}.md`:
 |---------|------------|-------|
 | docs/knowledge-base/category/existing.md | Conductor merge (task-XX) | Integrated proposal content |
 ```
+</template>
 
+<core>
 ### Step 6: Write Decision Log
 
 Create `temp/rag-decisions-{task-id}.md` for resumption sessions:
+</core>
 
+<template follow="format">
 ```markdown
 # RAG Processing Decisions — task-XX
 
@@ -153,11 +191,15 @@ Create `temp/rag-decisions-{task-id}.md` for resumption sessions:
 ## Rejected Proposals
 - proposals/rag-Z.md (Reason: duplicate of existing-file.md)
 ```
+</template>
 
+<core>
 ### Step 7: Set Task to review_approved
 
 After all decisions are made and manifest/decision-log written:
+</core>
 
+<template follow="exact">
 ```sql
 UPDATE orchestration_tasks
 SET state = 'review_approved', last_heartbeat = datetime('now')
@@ -168,14 +210,21 @@ VALUES ('task-XX', 'task-00',
     'APPROVAL: RAG proposals reviewed and decisions made. Manifest ready at docs/implementation/reports/rag-ingest-manifest-task-XX.md. Musician can now release and idle.',
     'approval');
 ```
+</template>
 
+<context>
 Musician can now continue or idle. RAG ingestion proceeds independently.
+</context>
 
+<core>
 ### Step 8: Launch Ingestion Subagent
 
 **When:** After conductor completes decisions and sets `review_approved`.
 
 **Launch subagent:**
+</core>
+
+<template follow="format">
 ```
 Task("Ingest RAG files", prompt="""
 Your role: Extract approved RAG files from proposals and ingest them into the local-rag server.
@@ -201,7 +250,9 @@ This file contains:
    - Manifest archived: yes/no
 """, model="opus", run_in_background=False)
 ```
+</template>
 
+<core>
 ### Step 9: Update STATUS.md
 
 Mark "Pending RAG Processing" entry for this task as complete.
@@ -209,7 +260,11 @@ Mark "Pending RAG Processing" entry for this task as complete.
 ### Step 10: Return to Monitoring
 
 Proceed to Monitoring step 7 (repeat monitoring cycle).
+</core>
+</section>
 
+<section id="handling-interruptions-during-processing">
+<core>
 ## Handling Interruptions During RAG Processing
 
 If a message-watcher event arrives while conductor is in decision phase (waiting for user input on merge decisions):
@@ -229,7 +284,11 @@ If a message-watcher event arrives while conductor is in decision phase (waiting
    - **Option A:** Conductor handles task-03 review/error/completion, then returns to RAG (resume merge decisions)
    - **Option B:** Conductor continues RAG, task-03 waits (watcher will detect it again next cycle)
 5. **If resuming after Option A:** STATUS.md "Pending RAG Processing" section should have recorded which proposals have been decided and which remain. Resuming session continues from that point.
+</core>
+</section>
 
+<section id="resumption-after-exit">
+<core>
 ## Resumption After Conductor Exit
 
 If conductor exits during RAG processing (context exhaustion, user request):
@@ -241,10 +300,18 @@ If conductor exits during RAG processing (context exhaustion, user request):
    - After ingestion started: Re-launch ingestion subagent
 3. **References `temp/rag-decisions-*` if it exists** (conductor's decisions-so-far during previous session)
 4. **Continues workflow from interruption point**
+</core>
+</section>
 
+<section id="design-principles">
+<guidance>
 ## Key Design Principles
 
 - **Always launch fresh:** Each subagent call is independent; no state carried in subagent context
 - **Conductor makes editorial decisions:** Merge/approve/reject calls are conductor's responsibility, not subagent's
 - **Background watcher is always active:** RAG work is high-level action, watcher runs independently
 - **Record decisions-so-far:** STATUS.md and temp/ files allow clean resumption without re-doing work
+</guidance>
+</section>
+
+</skill>

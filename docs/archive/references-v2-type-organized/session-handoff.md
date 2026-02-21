@@ -1,3 +1,26 @@
+<skill name="conductor-session-handoff" version="2.0">
+
+<metadata>
+type: reference
+parent-skill: conductor
+tier: 3
+</metadata>
+
+<sections>
+- handoff-types
+- clean-handoff
+- dirty-handoff
+- crash-handoff
+- retry-exhaustion
+- worked-by-succession
+- guard-clause-reclaiming
+- high-context-verification
+- replacement-session-launch
+- context-situation-checklist
+</sections>
+
+<section id="handoff-types">
+<core>
 # Session Handoff Reference
 
 ## Handoff Types
@@ -12,11 +35,17 @@ When an musician session exits, the conductor determines the handoff type and re
 | **Dirty** | HANDOFF present, context >80% | Hallucination risk | Same as clean BUT include test verification instructions in msg |
 | **Crash** | No HANDOFF doc | Emergency state | Send msg with verification instructions for last completed steps |
 | **Retry Exhaustion** | 5th retry failure | Conductor error | Escalate to user with retry options |
+</core>
+</section>
 
+<section id="clean-handoff">
+<core>
 ## Clean Handoff Procedure
 
 When musician exits cleanly with HANDOFF doc and context <80%:
+</core>
 
+<template follow="format">
 ```sql
 -- Conductor flow:
 -- 1. Detect exit: query orchestration_tasks WHERE state = 'exited' AND task_id = 'task-NN'
@@ -37,7 +66,11 @@ INSERT INTO orchestration_messages (task_id, from_session, message, message_type
     'handoff'
 );
 ```
+</template>
+</section>
 
+<section id="dirty-handoff">
+<core>
 ## Dirty Handoff Procedure
 
 When HANDOFF is present BUT context >80% (hallucination risk from context-exhausted session):
@@ -50,11 +83,17 @@ Previous session context was 87% (potential hallucination risk).
 Before proceeding: Re-run ALL verification tests from last completed checkpoint.
 If any fail, do NOT trust the test results in the HANDOFF — use your own judgment.
 ```
+</core>
+</section>
 
+<section id="crash-handoff">
+<core>
 ## Crash Handoff Procedure
 
 When no HANDOFF doc exists (musician crashed without graceful exit):
+</core>
 
+<template follow="format">
 ```sql
 -- Read last known state from temp/task-NN-status
 -- Extract: last completed step, context at crash, deviations tracked
@@ -77,11 +116,17 @@ INSERT INTO orchestration_messages (task_id, from_session, message, message_type
     'handoff'
 );
 ```
+</template>
+</section>
 
+<section id="retry-exhaustion">
+<core>
 ## Retry Exhaustion Procedure
 
 When musician self-exits after 5 failed retries (retry_count = 5):
+</core>
 
+<template follow="format">
 ```sql
 -- This is an CONDUCTOR ERROR, not musician error
 -- Musician wrote HANDOFF explaining the repeated failure pattern
@@ -104,7 +149,11 @@ INSERT INTO orchestration_messages (task_id, from_session, message, message_type
     'handoff'
 );
 ```
+</template>
+</section>
 
+<section id="worked-by-succession">
+<core>
 ## Worked_By Succession Pattern
 
 When re-claiming a task for a new musician session, increment the suffix:
@@ -123,11 +172,17 @@ First session:  worked_by = 'musician-task-03'
 Second session: worked_by = 'musician-task-03-S2'
 Third session:  worked_by = 'musician-task-03-S3'
 ```
+</core>
+</section>
 
+<section id="guard-clause-reclaiming">
+<core>
 ## Guard Clause Re-Claiming
 
 When conductor sets `fix_proposed`, the next session can claim:
+</core>
 
+<template follow="exact">
 ```sql
 -- Guard clause allows claiming from only 3 states
 UPDATE orchestration_tasks
@@ -140,9 +195,13 @@ SET state = 'working',
 WHERE task_id = 'task-03'
   AND state IN ('watching', 'fix_proposed', 'exit_requested');  -- 3 claimable states
 ```
+</template>
 
+<core>
 If guard blocks (state not claimable), session creates fallback row:
+</core>
 
+<template follow="exact">
 ```sql
 INSERT INTO orchestration_tasks (task_id, state, session_id, last_heartbeat)
 VALUES ('fallback-$CLAUDE_SESSION_ID', 'exited', '$CLAUDE_SESSION_ID', datetime('now'));
@@ -152,9 +211,15 @@ VALUES ('task-03', '$CLAUDE_SESSION_ID',
     'CLAIM BLOCKED: Guard prevented claim on task-03. Created fallback row to exit cleanly.',
     'claim_blocked');
 ```
+</template>
 
+<context>
 Conductor detects fallback row via monitoring and adjusts plan.
+</context>
+</section>
 
+<section id="high-context-verification">
+<mandatory>
 ## High-Context Verification Rule
 
 When resuming a task with context >80% usage in previous session:
@@ -168,7 +233,11 @@ When resuming a task with context >80% usage in previous session:
 5. Only resume if tests pass with your own execution
 
 **Rationale:** High-context exhaustion (>80%) means the previous session was operating near capacity — likely hallucinating. Tests are your ground truth, not session claims.
+</mandatory>
+</section>
 
+<section id="replacement-session-launch">
+<core>
 ## Replacement Session Launch
 
 When an musician session exits and needs replacement, the conductor launches a replacement kitty window directly and notifies the user:
@@ -187,6 +256,9 @@ Launching replacement session in new kitty window...
 ```
 
 **Launch replacement via Bash tool:**
+</core>
+
+<template follow="exact">
 ```bash
 kitty --directory /home/kyle/claude/remindly --title "Musician: task-XX (S2)" -- env -u CLAUDECODE claude --permission-mode acceptEdits "/musician
 
@@ -209,9 +281,15 @@ Read HANDOFF from temp/ for context.
 
 Do not proceed without reading the full instruction message. All steps are there." &
 ```
+</template>
 
-See `references/musician-launch-prompt-template.md` (Launching Replacement Sessions) for the full template.
+<reference path="skills_staged/conductor/references/musician-launch-prompt-template.md" load="recommended">
+Full launch prompt template (Launching Replacement Sessions section).
+</reference>
+</section>
 
+<section id="context-situation-checklist">
+<core>
 ## Context Situation Checklist
 
 When evaluating context-exhausted musician's proposal, assess:
@@ -224,3 +302,7 @@ When evaluating context-exhausted musician's proposal, assess:
 - [ ] Proposed action specificity? (vague = less confidence)
 
 Use results to choose response: `review_approved` (low risk), `fix_proposed` (override scope), or `review_failed` (stop now).
+</core>
+</section>
+
+</skill>

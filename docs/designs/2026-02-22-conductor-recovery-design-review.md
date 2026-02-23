@@ -675,3 +675,237 @@ Shows which agents found each issue (confirms findings are independently validat
 | I10. Export file expectations | | | | | | | X | X |
 | S10. Step 5 query filter | | | | | X | | | |
 | S11. States are retroactive DDL | | | | | X | | | |
+
+---
+
+## Resolutions
+
+Decisions made during review discussion. These inform the design revision.
+
+### Simple Edits (no context change — apply directly)
+
+- **C1:** Add `tools/implementation-hook/stop-hook.sh` to file inventory. Add `context_recovery` to terminal states.
+- **C2:** Update all monitoring queries to `WHERE task_id NOT IN ('task-00', 'souffleur')` or `WHERE task_id LIKE 'task-%'`. Add `phase-execution.md` and `completion.md` to modified files.
+- **C4:** Add SKILL.md `repetiteur-protocol` section to modification list.
+- **C6:** Add scope distinction: `exit_requested` = Conductor→Musician signal, `context_recovery` = Conductor→Souffleur signal. Both coexist.
+- **I1:** Replace "same SQL as current clean-handoff procedure" with exact section reference: `musician-lifecycle.md` → `clean-handoff` section.
+- **I9:** Add `phase-execution.md`, `completion.md`, `review-protocol.md` to modified files list.
+- **S10:** Fix Recovery Bootstrap Step 5 query to `WHERE task_id NOT IN ('task-00', 'souffleur')`.
+- **S11:** Add note that `confirmed`/`context_recovery` are retroactive DDL alignment — Souffleur already depends on these states.
+- **S12:** Acknowledge PID naming divergence (`musician-task-XX.pid`, `souffleur-conductor.pid`, `repetiteur.pid`).
+- **S18:** Reword "minor guidance update" to "addition of Conductor self-monitoring concern."
+- **S19:** Clarify Souffleur status: "staged but not deployed" instead of "In development."
+- **S24:** Add explicit SQL: `SELECT session_id FROM orchestration_tasks WHERE task_id = '{task-id}';`
+
+### Context Changes — Resolved
+
+**C3: Missing launch templates (compact watcher, heartbeat agent)**
+
+The design should specify mechanism and key parameters. Full `<template>` blocks are deferred to the reference files during implementation.
+
+**Compact watcher parameters:**
+- Type: Background Task subagent
+- Inputs: JSONL path, baseline line count
+- Behavior: Poll every 1s, read lines > baseline, parse as JSON, match `{"type": "system", "subtype": "compact_boundary"}` field-by-field
+- Timeout: 5 minutes from launch → treat as compact failure, fall back to fresh session launch
+- Malformed JSON: skip line, continue
+- On detection: INSERT completion message into `orchestration_messages` (task_id, message='compact_complete', type='system'), then exit
+- Conductor polls comms-link for that message
+
+**Heartbeat agent parameters:**
+- Type: Background Task subagent
+- Immediate action: UPDATE task-00 `session_id` and `last_heartbeat`
+- SQL: `UPDATE orchestration_tasks SET session_id = '{SESSION_ID}', last_heartbeat = datetime('now') WHERE task_id = 'task-00';`
+- Loop: refresh `last_heartbeat` every 30s
+- Kill protocol: Conductor INSERTs `heartbeat_agent_shutdown` message into `orchestration_messages`. Agent polls for this message each loop iteration and exits when found.
+- Error handling: UPDATE failure → log, continue looping (transient)
+
+---
+
+**C5: Musician states not set to `exited` before SIGTERM**
+
+The `context-exhaustion-trigger` Step 3 must set all active task states to `exited` BEFORE sending SIGTERM:
+
+```
+For each active Musician task:
+  1. UPDATE state = 'exited' WHERE task_id = '{task_id}'
+  2. kill $(cat temp/musician-{task_id}.pid)
+  3. rm temp/musician-{task_id}.pid
+```
+
+---
+
+**I2: Message-watcher stays running during compaction**
+
+Message-watcher continues running during Compact Protocol. Compact watcher runs alongside it as a second background subagent. If the message-watcher exits during compaction (detects state change from another Musician), handle via normal Message-Watcher Exit Protocol, relaunch watcher, continue waiting for compact watcher completion.
+
+---
+
+**I3: Repetiteur communication protocol**
+
+- `sender` values: `'conductor'`, `'repetiteur'`, `'user'` (user input relayed by Conductor)
+- New message detection: each side tracks its last-read `id`. Poll with `WHERE id > $LAST_READ_ID AND sender != $SELF ORDER BY id`
+- Polling interval: ~3 seconds during active consultation
+- Conversation end signal: Repetiteur inserts a message with `[HANDOFF]` prefix, same as current SendMessage handoff pattern
+- Message format: free text, same as current SendMessage content
+
+---
+
+**I4: Steps 4/5 ordering tension**
+
+No reorder. Add note to Step 4: "Stage 2 may require querying comms-link before Step 5's formal state reconstruction. This is expected — Stage 2 tests whether you can orient from the export and handoff alone, with database queries as the fallback that confirms you need Step 5's full reconstruction."
+
+---
+
+**I5: Handoff document format/filename**
+
+`temp/HANDOFFS/Conductor/handoff.md` — single file, overwritten each time. Freeform markdown, not structured for parsing. Content is whatever the dying Conductor considers useful: current phase, active tasks, pending events, in-progress decisions, notes.
+
+---
+
+**I6: Compact watcher timeout failure recovery**
+
+Full failure path:
+1. Watcher times out (5 min) without detecting `compact_boundary`
+2. Conductor checks compact session PID — alive or dead?
+3. If alive: kill it (compact hung)
+4. If dead: scan JSONL from baseline forward one final time (signal may have been written just before timeout)
+5. If signal found in final scan: proceed normally (resume session)
+6. If no signal: compact failed — fall back to existing fresh-session-with-HANDOFF launch. Log to learnings file.
+
+---
+
+**I7: High-context verification after compaction — FALSE POSITIVE**
+
+Not a real issue. The existing review pipeline already catches bad work from high-context sessions. The Conductor reviews Musician output regardless of whether the session was compacted. For the Conductor's own compaction, the Recovery Bootstrap has adversarial validation (Step 8) baked in.
+
+---
+
+**I8: Adversarial validation teammates**
+
+- Launch: Task tool, 2 parallel teammates, Opus
+- Teammate A: Recent task work — read task instruction file + work output (report, git diff, test results) for most recently completed/active task(s). Prose summary of deviations, errors, incomplete steps.
+- Teammate B: Phase coherence — read all task instructions for current phase + completion states from DB. Prose summary of integration issues, conflicts, sequencing problems.
+- Timeout: 5 minutes each
+- Output: Both report prose findings to Conductor. All findings feed Step 9.
+- Context cost mitigation: If current phase has ≤2 tasks, collapse to single teammate covering both scopes.
+
+---
+
+**I10: Export file parsing expectations**
+
+- Path source: `{EXPORT_PATH}` substitution in the Souffleur's launch prompt
+- Format: Markdown (clean markdown with "Files Modified" summary at top, per Souffleur conductor-relaunch.md)
+- Truncation behavior: Souffleur preserves "Files Modified" summary at top PLUS most recent ~800k chars. Middle of conversation is cut, not the head or tail. Conductor always gets file inventory + recent work.
+- What to extract: read as context — don't parse, just absorb
+- If truncated and Stage 1 fails: supplement with crash-path fallback files (plan overview, docs READMEs)
+- If path invalid or file empty: treat as crash scenario, proceed to Step 2 fallback reads
+
+---
+
+**S1: Sentinel false positive during compaction**
+
+If the Sentinel reports a stall for a task currently undergoing compaction: relaunch the message-watcher per the Message-Watcher Exit Protocol (the watcher exited to deliver the Sentinel report), then discard the Sentinel finding — the session is intentionally down.
+
+---
+
+**S2: Compact Protocol trigger list (direct vs indirect)**
+
+Reword trigger list. Direct trigger: `musician-lifecycle.md context-exhaustion-flow`. Indirect path: `error-recovery.md context-warning-protocol` eventually leads there via the Musician's exit flow. Prevents implementers from adding a shortcut jump.
+
+---
+
+**S4: Learnings file creation/rotation policy**
+
+Lazy creation — append creates the file if it doesn't exist. No rotation — `temp/` handles cleanup on reboot. If file doesn't exist during Recovery Bootstrap Step 3, note "first generation" and continue. No archival step.
+
+---
+
+**S5: Context cost of adversarial validation**
+
+Not an additional issue. The teammates bear the context cost in their own windows — the Conductor only receives prose finding summaries. Already mitigated by the I8 collapse rule (≤2 tasks → single teammate).
+
+---
+
+**S6: `worked_by` increment justification**
+
+Add note: "`worked_by` increments on compact resume to track compaction boundaries. Each compaction is a new generation even though the session ID is preserved via `--resume`."
+
+---
+
+**S8: `/compact` is a built-in CLI command**
+
+Add note: "`/compact` is a built-in Claude Code command that triggers context compaction within the session. It is not a skill invocation."
+
+---
+
+**S9: `fix_proposed` + guard clause for resumed sessions**
+
+`--resume` preserves the same session ID. The guard clause claim transitions the state from `fix_proposed` to `working` — the `session_id` assignment is a no-op. `worked_by` increments to track the compaction boundary. No ambiguity to document.
+
+---
+
+**S13: Compact Protocol when no HANDOFF exists**
+
+Soften the prerequisite: "A HANDOFF document written by the session (if one exists). The Compact Protocol preserves session context via `--resume`, so a missing HANDOFF is not blocking — the resumed session retains its own context of the work in progress."
+
+---
+
+**S14: Compact Protocol applicability to Repetiteur**
+
+Add note: "The Compact Protocol as specified targets Musicians. Repetiteur compaction follows the same sequence but uses `temp/repetiteur.pid` for PID and tracks session ID via Conductor state (no database row). Detailed Repetiteur variant is scoped to the Repetiteur externalization workstream."
+
+---
+
+**S15: Souffleur `confirmed` → `watching` transition**
+
+Fix the lifecycle diagram. Remove the `confirmed -> watching` transition. Actual lifecycle: `watching -> confirmed -> complete` (or `watching -> error -> [retry] -> confirmed -> complete`, or `watching -> error x3 -> exited`). The row stays `confirmed` for the duration of normal operations.
+
+---
+
+**S16: `temp/` ephemerality risk for handoffs — DROPPED**
+
+No edit needed. The crash path handles missing handoffs by design.
+
+---
+
+**S17: Orphaned Repetiteur during recovery**
+
+Add to Recovery Bootstrap Step 6 triage: "Check `temp/repetiteur.pid`. If exists: check PID liveness. If alive: kill it (Repetiteur cannot continue without a Conductor to communicate with). Remove PID file. Re-invoke later if needed."
+
+---
+
+**S20: Step 2 crash fallback MEMORY.md dependency**
+
+Add note to Step 2: "Read MEMORY.md now for the plan path. Step 5 revisits MEMORY.md for broader state reconstruction."
+
+---
+
+**S21: Staged Context Tests Stage 3 failure**
+
+Add Stage 3 failure clause: "If fails: re-read SKILL.md Protocol Registry and Phase Execution Protocol reference. If still unable to articulate the loop: halt and report to user — recovery session may be corrupted."
+
+---
+
+**S22: Corrective action specifics (Step 9)**
+
+- Git rollback: `git revert` (not `git reset --hard`) — reversible, preserves history
+- Re-queue: SET state back to `watching`, clear `session_id` and `worked_by`
+- Small vs large threshold: single file with obvious correction → Conductor fixes directly. Multiple files or design decisions → delegate to teammate.
+- If work is sound: proceed to Step 10, no action needed.
+
+---
+
+**S23: SKILL.md preamble exact wording**
+
+Proposed replacement: "After loading this skill: if your invocation includes `--recovery-bootstrap`, proceed directly to the Recovery Bootstrap Protocol (skip Initialization Protocol entirely). Otherwise, proceed to the Initialization Protocol."
+
+---
+
+**S25: Conductor self-detection mechanism for context exhaustion**
+
+Not resolved in this review. The design specifies the pre-death sequence but not the detection trigger. This is a known gap to address during implementation — likely the Conductor monitors its own context usage periodically and triggers when approaching limits, similar to how Musicians detect their own context exhaustion.
+
+### Remaining Unresolved
+
+- **S25** (Conductor self-detection mechanism) — deferred to implementation

@@ -904,8 +904,6 @@ Proposed replacement: "After loading this skill: if your invocation includes `--
 
 **S25: Conductor self-detection mechanism for context exhaustion**
 
-Not resolved in this review. The design specifies the pre-death sequence but not the detection trigger. This is a known gap to address during implementation — likely the Conductor monitors its own context usage periodically and triggers when approaching limits, similar to how Musicians detect their own context exhaustion.
+The Conductor detects its own context exhaustion via the same platform-level context warnings that Musicians receive. No custom monitoring infrastructure is needed — Claude Code surfaces context usage warnings naturally. When the Conductor observes it is approaching context limits, it enters the `context-exhaustion-trigger` sequence.
 
-### Remaining Unresolved
-
-- **S25** (Conductor self-detection mechanism) — deferred to implementation
+### All Findings Resolved

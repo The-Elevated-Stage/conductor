@@ -1,4 +1,4 @@
-<skill name="conductor-phase-execution" version="3.0">
+<skill name="conductor-phase-execution" version="4.0">
 
 <metadata>
 type: reference
@@ -562,7 +562,7 @@ Proceed to SKILL.md → Message-Watcher Exit Protocol. This protocol handles rea
 
 ```sql
 SELECT task_id, state, last_heartbeat FROM orchestration_tasks
-WHERE task_id != 'task-00' AND state IN ('needs_review', 'error', 'complete', 'exited')
+WHERE task_id NOT IN ('task-00', 'souffleur') AND state IN ('needs_review', 'error', 'complete', 'exited')
 ORDER BY last_heartbeat DESC;
 ```
 
@@ -707,6 +707,8 @@ When all tasks in the current phase reach terminal state (`complete` or `exited`
 6. Proceed to next phase — return to plan-consumption section to read the next phase's content
 
 If this was the LAST phase: return to SKILL.md and locate the Completion Protocol.
+
+<guidance>After phase transitions, consider recording cross-cutting learnings to `temp/conductor-learnings.log` — patterns, conventions, or decisions that would help future Conductor generations.</guidance>
 </core>
 </section>
 
@@ -720,7 +722,7 @@ If this was the LAST phase: return to SKILL.md and locate the Completion Protoco
 ```sql
 SELECT task_id, state, last_heartbeat, retry_count, last_error
 FROM orchestration_tasks
-WHERE task_id != 'task-00'
+WHERE task_id NOT IN ('task-00', 'souffleur')
 ORDER BY task_id;
 ```
 </template>

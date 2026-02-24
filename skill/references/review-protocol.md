@@ -1,4 +1,4 @@
-<skill name="conductor-review-protocol" version="3.0">
+<skill name="conductor-review-protocol" version="4.0">
 
 <metadata>
 type: reference
@@ -73,6 +73,8 @@ If approving a completion review that has RAG proposals (type: `rag-addition` in
 
 ### Step 9: Return to Phase Execution Protocol
 After review completes, return to SKILL.md and locate the Phase Execution Protocol. The monitoring cycle re-entry handles checking for additional state changes and relaunching the watcher.
+
+<guidance>After reviews with notable findings, consider appending patterns to `temp/conductor-learnings.log` — recurring issues, architectural insights, or process improvements worth preserving across Conductor generations.</guidance>
 
 <mandatory>After review handling completes, proceed to SKILL.md → Message-Watcher Exit Protocol if the watcher is not already running.</mandatory>
 </core>

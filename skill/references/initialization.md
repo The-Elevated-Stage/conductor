@@ -1,4 +1,4 @@
-<skill name="conductor-initialization" version="3.0">
+<skill name="conductor-initialization" version="4.0">
 
 <metadata>
 type: reference
@@ -13,12 +13,15 @@ protocol: Initialization Protocol
 - plan-bootstrap-reading
 - user-approval-gate
 - database-initialization
+- souffleur-launch
+- message-watcher-launch
 - schema-verification
 - column-reference
 - database-location
 - state-machine-overview
 - conductor-states
 - execution-states
+- infrastructure-states
 - state-ownership
 - state-transition-flows
 - heartbeat-rule
@@ -34,7 +37,7 @@ protocol: Initialization Protocol
 
 ## Bootstrap Sequence
 
-Execute these steps in order. Steps 1-5 are reads (parallelizable). Steps 6-7 are writes (sequential). Step 8 is the user gate.
+Execute these steps in order. Steps 1-5 are reads (parallelizable). Steps 6-8 are writes (sequential). Step 9 is verification. Step 10 is the user gate.
 
 ### Step 1: Read Implementation Plan (Selective)
 
@@ -71,13 +74,21 @@ Read the full knowledge graph via `read_graph` from memory MCP. This provides pr
 
 ### Step 6: Initialize Database
 
-Drop and recreate tables via comms-link execute. Insert conductor row. See database-initialization section for full DDL.
+Drop and recreate tables via comms-link execute. Insert conductor row and Souffleur row. See database-initialization section for full DDL.
 
-### Step 7: Verify Hooks
+### Step 7: Launch Souffleur
+
+Discover own kitty PID, then launch the Souffleur supervisor. See souffleur-launch section for the full launch sequence and hard gate.
+
+### Step 8: Launch Message Watcher
+
+After the Souffleur is confirmed, launch the background message watcher before hook verification or user approval. See message-watcher-launch section for details.
+
+### Step 9: Verify Hooks
 
 Hooks are self-configuring via `hooks.json` and SessionStart hook. See hook-verification section for details.
 
-### Step 8: User Approval Gate
+### Step 10: User Approval Gate
 
 Present the plan overview to the user (from the Overview and Phase Summary sections read in Step 1). The user approves the execution approach.
 
@@ -148,6 +159,7 @@ The user approves the execution approach. This is the LAST interactive gate in t
 -- Drop existing tables (clean start for new implementation)
 DROP TABLE IF EXISTS orchestration_tasks;
 DROP TABLE IF EXISTS orchestration_messages;
+DROP TABLE IF EXISTS repetiteur_conversation;
 
 -- Table 1: State machine + lifecycle
 CREATE TABLE orchestration_tasks (
@@ -155,7 +167,9 @@ CREATE TABLE orchestration_tasks (
     state TEXT NOT NULL CHECK (state IN (
         'watching', 'reviewing', 'exit_requested', 'complete',
         'working', 'needs_review', 'review_approved', 'review_failed',
-        'error', 'fix_proposed', 'exited'
+        'error', 'fix_proposed', 'exited',
+        'context_recovery',
+        'confirmed'
     )),
     instruction_path TEXT,
     session_id TEXT,
@@ -177,10 +191,23 @@ CREATE TABLE orchestration_messages (
     message_type TEXT CHECK (message_type IN (
         'review_request', 'error', 'context_warning', 'completion',
         'emergency', 'handoff', 'approval', 'fix_proposal',
-        'rejection', 'instruction', 'claim_blocked', 'resumption'
+        'rejection', 'instruction', 'claim_blocked', 'resumption',
+        'system'
     )),
     timestamp TEXT DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Table 3: Repetiteur conversation (back-and-forth dialogue)
+CREATE TABLE repetiteur_conversation (
+    id INTEGER PRIMARY KEY,
+    sender TEXT NOT NULL,
+    message TEXT NOT NULL,
+    timestamp TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Insert infrastructure rows
+INSERT INTO orchestration_tasks (task_id, state, last_heartbeat)
+VALUES ('souffleur', 'watching', datetime('now'));
 
 -- Insert conductor row
 INSERT INTO orchestration_tasks (task_id, state, last_heartbeat)
@@ -192,6 +219,63 @@ CREATE INDEX idx_messages_type ON orchestration_messages(message_type);
 CREATE INDEX idx_tasks_state_heartbeat ON orchestration_tasks(state, last_heartbeat);
 ```
 </template>
+</section>
+
+<section id="souffleur-launch">
+<core>
+## Step 7: Launch Souffleur
+
+### Discover Own Kitty PID
+
+Walk the process tree to find the kitty PID that owns this session. This PID is passed to the Souffleur so it can monitor the Conductor's terminal window.
+
+See RAG: "kitty PID discovery" for the discovery method.
+
+### Launch Souffleur
+
+```bash
+kitty --directory /home/kyle/claude/remindly \
+  --title "Souffleur" \
+  -- env -u CLAUDECODE claude \
+  --permission-mode acceptEdits \
+  "/souffleur PID:$KITTY_PID SESSION_ID:$CLAUDE_SESSION_ID" &
+```
+
+`$CLAUDE_SESSION_ID` is a system prompt value injected by the SessionStart hook — it is NOT a bash environment variable. The Conductor references it from its own context when constructing the launch command.
+
+### Hard Gate: Souffleur Confirmation
+
+Poll comms-link until the Souffleur row reaches `state = 'confirmed'`:
+
+```sql
+SELECT state FROM orchestration_tasks WHERE task_id = 'souffleur';
+```
+
+**If `confirmed`:** Souffleur is ready. Proceed to Step 8.
+
+**If `error`:** Read the Souffleur's diagnostic message from orchestration_messages and respond with corrected arguments.
+
+**If `exited` after 3 failures:** Report to user — cannot proceed without a live Souffleur. The Conductor requires Souffleur supervision for recovery capability.
+</core>
+
+<mandatory>
+The Souffleur launch is a hard gate — the Conductor MUST NOT proceed to any further steps (message watcher, hook verification, user approval, or phase execution) until the Souffleur row reaches `confirmed` state. A Conductor without a live Souffleur has no recovery capability.
+</mandatory>
+</section>
+
+<section id="message-watcher-launch">
+<core>
+## Step 8: Launch Message Watcher
+
+After the Souffleur is confirmed, launch the background message watcher immediately — before hook verification, user approval, or any Musicians.
+
+The message watcher provides:
+- Event detection for task state changes (review requests, errors, completions)
+- Conductor heartbeat refreshing on every poll cycle
+- Foundation for the monitoring infrastructure that all subsequent protocols depend on
+
+Launch the message watcher using the monitoring-subagent-template from the Phase Execution Protocol reference file. The watcher must be running before the Conductor enters phase execution.
+</core>
 </section>
 
 <section id="schema-verification">
@@ -218,7 +302,7 @@ If columns are missing or tables don't exist: drop and recreate using the DDL ab
 | Column | Type | Purpose |
 |--------|------|---------|
 | `task_id` | TEXT PK | `task-00` (conductor), `task-01`+ (execution), `fallback-{session_id}` (guard block exits), `task-XX-fix` (post-completion corrections) |
-| `state` | TEXT NOT NULL | State machine value (11 valid states via CHECK) |
+| `state` | TEXT NOT NULL | State machine value (13 valid states via CHECK) |
 | `instruction_path` | TEXT | Path to task instruction file in `docs/tasks/` |
 | `session_id` | TEXT | Actual Claude Code session ID (set by SessionStart hook, injected into system prompt as $CLAUDE_SESSION_ID) |
 | `worked_by` | TEXT | Worker identifier with succession: `musician-task-{NN}`, `musician-task-{NN}-S2`, etc. |
@@ -256,7 +340,7 @@ If columns are missing or tables don't exist: drop and recreate using the DDL ab
 <core>
 ## State Machine Overview
 
-All state is stored in `orchestration_tasks` in `comms.db`. Single `state` column with CHECK constraint enforcing exactly 11 valid values. No separate `status` column.
+All state is stored in `orchestration_tasks` in `comms.db`. Single `state` column with CHECK constraint enforcing exactly 13 valid values. No separate `status` column.
 
 Individual state transitions are co-located in the protocol files where they're used. This section provides the overview — the complete picture of what states exist, who owns them, and how they flow.
 </core>
@@ -272,8 +356,9 @@ Individual state transitions are co-located in the protocol files where they're 
 | `reviewing` | Conductor | Actively reviewing a submission | No |
 | `exit_requested` | Conductor | Needs to exit (context full, user consultation) | Yes (hook allows exit) |
 | `complete` | Conductor | All tasks done | Yes (hook allows exit) |
+| `context_recovery` | Conductor | Context exhausted, handoff prepared, Souffleur kills and relaunches | Yes (hook allows exit) |
 
-Hook exit criteria: Conductor session can only exit when state is `exit_requested` or `complete`.
+Hook exit criteria: Conductor session can only exit when state is `exit_requested`, `complete`, or `context_recovery`.
 </core>
 </section>
 
@@ -297,11 +382,27 @@ Hook exit criteria: Execution session can only exit when state is `complete` or 
 </core>
 </section>
 
+<section id="infrastructure-states">
+<core>
+## Infrastructure States
+
+| State | Set By | Meaning | Terminal? |
+|-------|--------|---------|-----------|
+| `confirmed` | Souffleur | Bootstrap validation passed — Souffleur is operational | No |
+
+The `confirmed` state is used exclusively by the Souffleur row (`task_id = 'souffleur'`). It signals that the Souffleur has completed its own bootstrap and is actively supervising the Conductor. The Souffleur row stays `confirmed` for the duration of normal operations — there is no `confirmed` → `watching` transition.
+</core>
+
+<context>
+Both `confirmed` and `context_recovery` are retroactive DDL alignment — the Souffleur skill (v1.1) already depends on these states. Without these additions to the CHECK constraint, the Souffleur's state transitions would violate the constraint at runtime.
+</context>
+</section>
+
 <section id="state-ownership">
 <core>
 ## State Ownership Summary
 
-**Conductor sets:** `watching`, `reviewing`, `exit_requested`, `complete`, `review_approved`, `review_failed`, `fix_proposed`, `exited` (heartbeat staleness only)
+**Conductor sets:** `watching`, `reviewing`, `exit_requested`, `complete`, `review_approved`, `review_failed`, `fix_proposed`, `context_recovery`, `exited` (heartbeat staleness only)
 
 **Execution sets:** `working`, `needs_review`, `error`, `complete`, `exited` (5th retry failure or clean context exit)
 </core>
@@ -329,6 +430,14 @@ Conductor happy path:
 
 Conductor context exit:
   watching → exit_requested
+
+Conductor context exit (recovery):
+  watching → context_recovery → [Souffleur kills, relaunches new Conductor]
+
+Souffleur lifecycle:
+  watching → confirmed → complete
+  watching → error → [retry] → confirmed → complete
+  watching → error → ... (x3) → exited
 ```
 </core>
 </section>
@@ -400,7 +509,7 @@ Hooks are self-configuring via `hooks.json` and the SessionStart hook. Verify:
 
 The SessionStart hook injects `CLAUDE_SESSION_ID={session_id}` into the system prompt via `additionalContext`. This is how the Conductor and Musicians identify themselves in the database.
 
-The Stop hook queries `orchestration_tasks` by session_id and only allows session exit when the task state is terminal (`complete`, `exited`, or `exit_requested` for conductor).
+The Stop hook queries `orchestration_tasks` by session_id and only allows session exit when the task state is terminal (`complete`, `exited`, `exit_requested` for conductor, or `context_recovery` for conductor).
 </core>
 </section>
 

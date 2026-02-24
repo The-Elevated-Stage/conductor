@@ -1,4 +1,4 @@
-<skill name="conductor-repetiteur-invocation" version="3.0">
+<skill name="conductor-repetiteur-invocation" version="4.0">
 
 <metadata>
 type: reference
@@ -36,7 +36,7 @@ Execute these steps in order before spawning the Repetiteur. Do not skip or reor
 1. **Pause all Musicians** — Emergency broadcast to all active tasks (see pause-musicians section)
 2. **Write blocker report** — Persist to `decisions/{feature-name}/` (see blocker-report-persistence section)
 3. **Check consultation count** — Refuse r4, escalate to user instead (see consultation-count-check section)
-4. **Spawn Repetiteur** — Teammate with opus, 1m context, structured blocker report (see spawn-prompt-template section)
+4. **Spawn Repetiteur** — External Kitty session with opus, 1m context, structured blocker report (see spawn-prompt-template section)
 </mandatory>
 </section>
 
@@ -160,7 +160,25 @@ Prior completed phases do NOT get task-level breakdown — the Repetiteur works 
 <mandatory>
 ## Spawn Prompt Template
 
-The Repetiteur is spawned as a teammate using the Task tool with `model="opus"` and the Conductor's active `team_name`.
+The Repetiteur is spawned as an external Kitty session. The `/repetiteur` skill invocation carries the structured blocker report as its argument. No database row is created for the Repetiteur — its session ID is tracked in Conductor state only.
+
+### Launch Command
+
+<template follow="exact">
+```bash
+kitty --directory /home/kyle/claude/remindly \
+  --title "Repetiteur" \
+  -- env -u CLAUDECODE claude \
+  --permission-mode acceptEdits "/repetiteur" &
+echo $! > temp/repetiteur.pid
+```
+</template>
+
+The PID is captured to `temp/repetiteur.pid` (singleton — only one Repetiteur session exists at a time).
+
+### Prompt Template
+
+The `/repetiteur` skill invocation argument contains the structured blocker report:
 
 <template follow="format">
 /repetiteur
@@ -209,7 +227,32 @@ Uncommitted changes: {yes/no — details if yes}
 <core>
 ## Communication During Consultation
 
-The Repetiteur communicates with the Conductor via SendMessage. The Conductor's role during consultation is **ground-truth provider** — it answers questions from its execution context, provides perspective on what actually happened during implementation, and flags conflicts with implementation reality. The Repetiteur makes the final decisions.
+The Repetiteur communicates with the Conductor via the `repetiteur_conversation` table in comms-link. The Conductor's role during consultation is **ground-truth provider** — it answers questions from its execution context, provides perspective on what actually happened during implementation, and flags conflicts with implementation reality. The Repetiteur makes the final decisions.
+
+### Polling Model
+
+The Conductor polls the `repetiteur_conversation` table for new messages during active consultation. Each side tracks its last-read `id` to avoid re-reading messages.
+
+Read new messages (poll every ~3 seconds during active consultation):
+
+<template follow="exact">
+```sql
+SELECT id, sender, message, timestamp
+FROM repetiteur_conversation
+WHERE id > {LAST_READ_ID} AND sender != 'conductor'
+ORDER BY id;
+```
+</template>
+
+Send a message to the Repetiteur:
+
+<template follow="exact">
+```sql
+INSERT INTO repetiteur_conversation (sender, message) VALUES ('conductor', '{message_text}');
+```
+</template>
+
+Sender values: `'conductor'`, `'repetiteur'`, `'user'`.
 
 ### Ingestion Clarifications (Early)
 
@@ -240,8 +283,15 @@ If you explicitly disagree with a proposed approach, state the specific factual 
 
 During consultation, the user can see the Conductor's terminal output and may want to communicate with the Repetiteur.
 
-- Relay ALL user input to the Repetiteur via SendMessage verbatim — no interpretation or filtering
-- Reverse direction works naturally (Repetiteur's SendMessage appears in Conductor output, visible to user)
+- Relay ALL user input to the Repetiteur verbatim via INSERT into the conversation table — no interpretation or filtering:
+
+<template follow="exact">
+```sql
+INSERT INTO repetiteur_conversation (sender, message) VALUES ('user', '{user_input}');
+```
+</template>
+
+- The Repetiteur's messages appear in the conversation table; the Conductor reads and displays them in its terminal output so the user has visibility
 - When the Repetiteur is active, all user input goes to the Repetiteur UNLESS it is clearly a Conductor command ("stop", "abort", "status")
 - Be verbose in terminal output during the Repetiteur workflow — the user needs visibility into re-planning
 </mandatory>
@@ -268,7 +318,19 @@ The Conductor's authority boundary:
 <mandatory>
 ## Handoff Reception
 
-The Repetiteur's handoff message via SendMessage contains:
+The Repetiteur delivers its handoff via INSERT into the `repetiteur_conversation` table. The handoff message is signaled by the `[HANDOFF]` prefix on the Repetiteur's final message.
+
+The Conductor detects the handoff by checking if the latest message from the Repetiteur starts with `[HANDOFF]`:
+
+<template follow="exact">
+```sql
+SELECT id, message FROM repetiteur_conversation
+WHERE sender = 'repetiteur'
+ORDER BY id DESC LIMIT 1;
+```
+</template>
+
+If the message starts with `[HANDOFF]`, the handoff contains:
 - Path to the new remaining plan (Implementation Plan rX)
 - Revision number
 - Summary of what changed: approach revisions, rollbacks ordered, new phases added, phases preserved
@@ -276,14 +338,26 @@ The Repetiteur's handoff message via SendMessage contains:
 - Which phase to begin execution from (first phase in the remaining plan)
 - Path to the consultation journal for reference
 
-When the Conductor receives this message, the Repetiteur has already:
+When the Conductor receives the handoff, the Repetiteur has already:
 - Committed the remaining plan to git
 - Moved the superseded plan to `docs/plans/designs/superseded/`
 - Committed the consultation journal
 
+After receiving the handoff, kill the Repetiteur session:
+
+<template follow="exact">
+```bash
+PID=$(cat temp/repetiteur.pid 2>/dev/null)
+if [ -n "$PID" ] && kill -0 $PID 2>/dev/null; then
+    kill $PID
+fi
+rm -f temp/repetiteur.pid
+```
+</template>
+
 The directory state is clean. Proceed to the plan-changeover section.
 
-If the handoff message is NOT received (Repetiteur crash or timeout): the Conductor's timeout detects the stall. The previous plan remains active. Report to user — state is recoverable.
+If the handoff is NOT received (Repetiteur crash or conversation table silence): detect via PID check or extended silence in the conversation table. The previous plan remains active. Report to user — state is recoverable.
 </mandatory>
 </section>
 
@@ -365,16 +439,30 @@ The Conductor never looks in `superseded/`. Only the Repetiteur reads superseded
 ## Error Scenarios During Consultation
 
 ### Vision Deviation
-The Repetiteur determines the blocker contradicts the design document itself (not just the implementation approach). It sends an escalation notice instead of a handoff. Relay to user — the design needs revision, not another implementation attempt.
+The Repetiteur determines the blocker contradicts the design document itself (not just the implementation approach). It sends an escalation notice via the conversation table instead of a handoff. Relay to user — the design needs revision, not another implementation attempt.
 
 ### Verification Loop Failure
-The Repetiteur's internal quality check cannot produce a clean plan. It messages that the consultation was unable to produce a verified plan. Relay to user — the blocker may be more fundamental than initially assessed.
+The Repetiteur's internal quality check cannot produce a clean plan. It messages via the conversation table that the consultation was unable to produce a verified plan. Relay to user — the blocker may be more fundamental than initially assessed.
 
 ### Handoff Parse Failure
 The remaining plan's verification index is missing or malformed. Treat as unverified. Report to user — do NOT attempt to execute an unverified plan.
 
 ### Repetiteur Crash (No Handoff Received)
-The Conductor never receives the handoff message and remains in waiting state. The previous plan may still be in `docs/plans/designs/` (not yet moved to `superseded/`), and the new plan may be committed but the Conductor doesn't know about it. Timeout detects the stall. Report to user — the state is recoverable (user can inspect directory and complete transition manually or restart consultation).
+Detect via PID check or extended silence in the conversation table (no new messages for an extended period):
+
+<template follow="exact">
+```bash
+PID=$(cat temp/repetiteur.pid 2>/dev/null)
+if [ -z "$PID" ] || ! kill -0 $PID 2>/dev/null; then
+    # Repetiteur is dead
+fi
+```
+</template>
+
+The previous plan may still be in `docs/plans/designs/` (not yet moved to `superseded/`), and the new plan may be committed but the Conductor doesn't know about it. Report to user — the state is recoverable (user can inspect directory and complete transition manually or restart consultation).
+
+### Context Exhaustion
+The Repetiteur can be compacted via the Compact Protocol on context exhaustion (same pattern as Musicians, but using `temp/repetiteur.pid` and tracking session ID in Conductor state rather than a database row).
 
 <mandatory>In all error scenarios where the handoff was never sent, the previous plan remains the active plan from the Conductor's perspective. MEMORY.md was not updated, so the plan reference is still correct.</mandatory>
 </core>

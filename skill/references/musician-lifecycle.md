@@ -1,4 +1,4 @@
-<skill name="conductor-musician-lifecycle" version="3.0">
+<skill name="conductor-musician-lifecycle" version="4.0">
 
 <metadata>
 type: reference
@@ -79,7 +79,7 @@ When a Musician session exits, the Conductor determines the handoff type and res
 | **Dirty** | HANDOFF present, context >80% | Hallucination risk | Same as clean BUT include test verification instructions in msg |
 | **Crash** | No HANDOFF doc | Emergency state | PID check first, then send msg with verification instructions for last completed steps |
 | **Retry Exhaustion** | 5th retry failure | Conductor error | Escalate — route to Error Recovery Protocol, then potentially Repetiteur Protocol |
-| **Context Exit** | Clean exit due to context management | Not an error | Simplified automation (see context-exhaustion-flow section) |
+| **Context Exit** | Clean exit due to context management | Not an error | Compact and resume (see Compact Protocol via SKILL.md) |
 
 <mandatory>For all handoff types: close the old kitty window (kill PID) BEFORE launching any replacement. Read the PID file, SIGTERM the process, remove the PID file, then proceed.</mandatory>
 </core>
@@ -206,17 +206,11 @@ Close the kitty window (kill PID, remove PID file). Route to Error Recovery Prot
 
 <section id="context-exhaustion-flow">
 <core>
-## Context Exhaustion — Simplified Flow
+## Context Exhaustion Flow
 
-When a Musician exits due to context management (the most common handoff scenario):
+When a Musician exits due to context exhaustion (state = `exited`, HANDOFF present), proceed to SKILL.md → Compact Protocol. The Compact Protocol handles the full cycle: closing the old session, compacting context, and resuming with accumulated context preserved.
 
-1. Detect exit: state = `exited` in orchestration_tasks
-2. Close kitty window (kill PID, remove PID file)
-3. Read `temp/task-NN-HANDOFF` for completed/pending steps
-4. Set state to `fix_proposed` and send handoff message
-5. Launch fresh replacement session with HANDOFF context in the prompt
-
-No `--resume` for exhaustion — the session is already at its context limit. A fresh session with HANDOFF context is the correct approach. The HANDOFF doc tells the replacement session exactly where to pick up.
+This is the direct trigger for the Compact Protocol.
 </core>
 </section>
 

@@ -1,4 +1,4 @@
-<skill name="conductor-completion" version="3.0">
+<skill name="conductor-completion" version="4.0">
 
 <metadata>
 type: reference
@@ -52,7 +52,7 @@ When all tasks in all phases reach terminal state (`complete` or `exited`), exec
 ```sql
 SELECT task_id, state, completed_at, report_path
 FROM orchestration_tasks
-WHERE task_id != 'task-00'
+WHERE task_id NOT IN ('task-00', 'souffleur')
 ORDER BY task_id;
 ```
 </template>
@@ -261,7 +261,7 @@ The stop hook detects `complete` state and allows the Conductor session to exit 
 `complete` and `exited` are terminal states for both Conductor and Musician tasks.
 
 **Conductor (task-00):**
-- Hook exit criteria: session can only exit when state is `exit_requested` or `complete`
+- Hook exit criteria: session can only exit when state is `exit_requested`, `complete`, or `context_recovery`
 
 **Musicians (task-01+):**
 - Hook exit criteria: session can only exit when state is `complete` or `exited`

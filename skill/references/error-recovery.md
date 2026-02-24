@@ -1,4 +1,4 @@
-<skill name="conductor-error-recovery" version="3.0">
+<skill name="conductor-error-recovery" version="4.0">
 
 <metadata>
 type: reference
@@ -26,6 +26,7 @@ protocol: Error Recovery Protocol
 - context-warning-detection-sql
 - staleness-detection-sql
 - context-situation-checklist
+- context-exhaustion-trigger
 </sections>
 
 <section id="entry-points">
@@ -104,6 +105,10 @@ Apply error-classification logic. Propose fix using fix-proposal-sql or escalate
 After sending the fix proposal, return to SKILL.md and locate the Phase Execution Protocol. The monitoring cycle re-entry handles checking for additional events.
 
 <mandatory>After error handling completes, proceed to SKILL.md → Message-Watcher Exit Protocol if the watcher is not already running.</mandatory>
+
+<guidance>
+After resolving errors, consider appending reusable insights to `temp/conductor-learnings.log` — patterns, workarounds, or gotchas that future Conductor generations should know.
+</guidance>
 </core>
 </section>
 
@@ -133,6 +138,10 @@ Use the appropriate SQL from the review-approval or fix-proposal sections.
 
 After responding, return to SKILL.md and locate the Phase Execution Protocol for monitoring re-entry.
 </core>
+
+<guidance>
+When the Conductor itself is running low on context (not a Musician), route to the context-exhaustion-trigger section instead of continuing to orchestrate. The Conductor detects its own context exhaustion via the same platform-level context warnings that Musicians receive — no custom monitoring infrastructure needed. If the Conductor receives a context warning about itself, stop dispatching new work and execute the context-exhaustion-trigger sequence.
+</guidance>
 </section>
 
 <section id="stale-heartbeat-recovery">
@@ -538,6 +547,68 @@ When evaluating a Musician with context warnings or error reports:
 
 Use results to choose response: `review_approved` (proceed), `fix_proposed` (override approach), or `review_failed` (stop and handoff).
 </core>
+</section>
+
+<section id="context-exhaustion-trigger">
+<core>
+## Context Exhaustion Trigger (Conductor)
+
+The Conductor's pre-death sequence when detecting its own context exhaustion. This sequence must execute in strict order — `context_recovery` is the kill trigger that signals the Souffleur to terminate and relaunch the Conductor.
+
+### Step 1: Write Handoff
+
+Write handoff to `temp/HANDOFFS/Conductor/handoff.md` — single file, overwritten each time. Include:
+- Current phase number and name
+- Active tasks and their states
+- Pending events (from MEMORY.md)
+- In-progress decisions or notes
+- Any relevant context the replacement Conductor should know
+
+Content is freeform markdown — write whatever the dying Conductor considers useful for the replacement session.
+
+### Step 2: Update MEMORY.md
+
+Update MEMORY.md with:
+- Plan path (for replacement Conductor to find the plan)
+- Handoff location (`temp/HANDOFFS/Conductor/handoff.md`)
+- Active task PIDs (for recovery cleanup)
+
+### Step 3: Close All External Musician Sessions
+
+For each active Musician task:
+
+```bash
+# 1. Set state to exited FIRST (before SIGTERM)
+# SQL via comms-link:
+# UPDATE orchestration_tasks SET state = 'exited', last_heartbeat = datetime('now') WHERE task_id = '{task_id}';
+
+# 2. Kill the session
+kill -0 $(cat temp/musician-{task_id}.pid) 2>/dev/null && kill $(cat temp/musician-{task_id}.pid)
+
+# 3. Clean up PID file
+rm temp/musician-{task_id}.pid
+```
+</core>
+
+<mandatory>
+States MUST be set to `exited` BEFORE sending SIGTERM. The stop hook blocks session exit for Musicians in non-terminal states like `working` or `needs_review`. If the Conductor sends SIGTERM first, the hook may prevent the session from exiting, leaving a zombie process.
+</mandatory>
+
+<core>
+### Step 4: Set context_recovery State
+</core>
+
+<mandatory>
+This MUST be the last step — after all Musicians are closed and all handoff data is written.
+
+```sql
+UPDATE orchestration_tasks
+SET state = 'context_recovery', last_heartbeat = datetime('now')
+WHERE task_id = 'task-00';
+```
+
+Setting `context_recovery` is the Souffleur's kill trigger. After this state is set, the Souffleur will terminate this Conductor session and launch a replacement. No further actions should be taken after this UPDATE — the session is effectively dead.
+</mandatory>
 </section>
 
 </skill>

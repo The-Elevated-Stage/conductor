@@ -51,7 +51,7 @@ ORDER BY timestamp DESC LIMIT 1;
 ```
 </template>
 
-The message structure contains: Context Usage (%), Self-Correction (YES/NO), Deviations (count + severity), Agents Remaining (count and %), Proposal (path to file), Summary (accomplishments), Files Modified (count), Tests (status and count), Smoothness (0-9), Reason (why review needed).
+The message structure contains: Context Usage (%), Self-Correction (YES/NO), Deviations (count + severity), Agents Remaining (count and %), Proposal (path to file), Summary (accomplishments), Files Modified (count), Tests (status and count), Smoothness (0-9), Reason (why review needed), Key Outputs (files created/modified/rag-addition).
 
 ### Step 3: Self-Correction Flag Check
 See self-correction-handling section. If `Self-Correction: YES`, context estimates are unreliable.
@@ -159,7 +159,8 @@ Track how many review cycles have occurred for this checkpoint:
 <template follow="exact">
 ```sql
 SELECT COUNT(*) FROM orchestration_messages
-WHERE task_id = '{task-id}' AND message_type = 'review_request';
+WHERE task_id = '{task-id}' AND message_type = 'review_request'
+AND message LIKE 'CHECKPOINT {N}:%';
 ```
 </template>
 

@@ -442,7 +442,7 @@ When evaluating a context-exhausted Musician's proposal, assess:
 - [ ] Prior context warnings on this task? (multiple = pattern of scope creep)
 - [ ] Proposed action specificity? (vague = less confidence)
 
-Use results to choose response: `review_approved` (low risk, proceed with Musician's proposal), `fix_proposed` (override scope — "Only do X then prepare handoff"), or `review_failed` (stop now, prepare handoff immediately).
+Use results to choose response: `review_approved` (low risk, proceed with Musician's proposal), `fix_proposed` (override scope — "Only do X then prepare handoff"), or `exit_requested` (stop now, prepare handoff immediately).
 </core>
 </section>
 

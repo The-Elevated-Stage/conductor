@@ -48,7 +48,7 @@ Result:
 ```
 task-03 | b358b967-0cbd-483b-90e0-6aa78c9d1baa | REVIEW REQUEST (Smoothness: 2/9):
 Context Usage: 28% (safe to proceed, no self-correction active)
-Self-Correction: false
+Self-Correction: NO
 Deviations: None
 Agents Remaining: 3 (task-04, task-05, task-06)
 Proposal: docs/implementation/proposals/task-03-testing-extraction.md
@@ -97,11 +97,11 @@ Read `docs/implementation/proposals/task-03-testing-extraction.md` and evaluate:
 
 Before deciding on approval or rejection, check if musician reported self-correction:
 
-**From the review message:** `Self-Correction: false`
+**From the review message:** `Self-Correction: NO`
 
 **Decision logic:**
-- **If Self-Correction: false** → Context estimates are reliable. Make approval/rejection decision normally.
-- **If Self-Correction: true** → Context estimates are unreliable (~6x bloat). Additional steps:
+- **If Self-Correction: NO** → Context estimates are reliable. Make approval/rejection decision normally.
+- **If Self-Correction: YES** → Context estimates are unreliable (~6x bloat). Additional steps:
   1. Compare actual context % to task instruction's estimated cost for this checkpoint
   2. If actual >> estimated: Musician may be thrashing. Ask if they want to exit early or continue.
   3. If actual ≈ estimated: Tell musician to reset flag to false, estimates are back in sync.
@@ -109,7 +109,7 @@ Before deciding on approval or rejection, check if musician reported self-correc
 </core>
 
 <context>
-Note: Task-03 shows "Self-Correction: false" and "Context Usage: 28% (safe to proceed)" so no additional context handling needed.
+Note: Task-03 shows "Self-Correction: NO" and "Context Usage: 28% (safe to proceed)" so no additional context handling needed.
 </context>
 </section>
 

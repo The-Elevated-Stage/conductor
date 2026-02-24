@@ -132,9 +132,9 @@ Evaluate using the context-situation-checklist section:
 Respond with ONE of:
 - **`review_approved`:** Proceed with Musician's proposal (reach checkpoint OR run N more agents — whatever Musician suggested)
 - **`fix_proposed`:** Override Musician's proposal — "Only do X then prepare handoff" or "Adjust approach to reduce context"
-- **`review_failed`:** Stop now, prepare handoff immediately
+- **`exit_requested`:** Stop now, prepare handoff immediately
 
-Use the appropriate SQL from the review-approval or fix-proposal sections.
+Use the appropriate SQL from the review-approval or fix-proposal sections. For `exit_requested`, set state to `exit_requested` with `last_heartbeat = datetime('now')` and send a message with `message_type = 'exit_request'` explaining the reason and directing the Musician to prepare HANDOFF.
 
 After responding, return to SKILL.md and locate the Phase Execution Protocol for monitoring re-entry.
 </core>
@@ -551,7 +551,7 @@ When evaluating a Musician with context warnings or error reports:
 - [ ] Prior context warnings on this task? (multiple = pattern of scope creep)
 - [ ] Proposed action specificity? (vague = less confidence)
 
-Use results to choose response: `review_approved` (proceed), `fix_proposed` (override approach), or `review_failed` (stop and handoff).
+Use results to choose response: `review_approved` (proceed), `fix_proposed` (override approach), or `exit_requested` (stop and handoff).
 </core>
 </section>
 

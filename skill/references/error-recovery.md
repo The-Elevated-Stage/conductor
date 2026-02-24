@@ -448,11 +448,17 @@ This is the format Musicians use to report errors. The Conductor reads these mes
 ```sql
 INSERT INTO orchestration_messages (task_id, from_session, message, message_type) VALUES (
     '{task-id}', '$CLAUDE_SESSION_ID',
-    'ERROR (Retry {N}/5):
+    'ERROR (Retry {N}/5): {description}
+
      Context Usage: {XX}%
      Self-Correction: {YES/NO}
-     Error: {description}
-     Report: docs/implementation/reports/{task-id}-error-retry-{N}.md
+     Step: {which step failed}
+     Error: {specific message}
+     Context: {relevant state}
+     Report: {error report path}
+     Key Outputs:
+       - {path} (created/modified)
+     Proposed fix: {what will be tried}
      Awaiting conductor fix proposal',
     'error'
 );

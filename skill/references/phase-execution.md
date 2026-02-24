@@ -138,11 +138,9 @@ Execution sessions report danger file interactions via messages:
 ```sql
 INSERT INTO orchestration_messages (task_id, from_session, message, message_type) VALUES (
     '{task-id}', '$CLAUDE_SESSION_ID',
-    'DANGER FILE UPDATE:
-     File: {path}
-     Action: {what was done}
-     Shared with: {other task IDs}
-     Status: {Complete, no conflicts detected / Conflict detected}',
+    'DANGER FILE UPDATE: {file-path}
+     Change: {what was modified}
+     Impact: {what parallel tasks should know}',
     'instruction'
 );
 ```
@@ -207,7 +205,7 @@ Load the copyist skill, then create task instruction files for this phase.
 **Task type:** {TYPE} (sequential/parallel)
 **Tasks to create:** {TASK_LIST with IDs}
 **Implementation plan:** {PLAN_PATH}
-**Line range:** {LINE_START}-{LINE_END} (read only these lines)
+**Phase section:** lines {LINE_START}-{LINE_END}
 **Output directory:** docs/tasks/
 
 ## Overrides & Learnings

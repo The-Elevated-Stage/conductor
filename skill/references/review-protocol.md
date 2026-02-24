@@ -221,21 +221,22 @@ INSERT INTO orchestration_messages (task_id, from_session, message, message_type
 This is the format Musicians use to submit reviews. The Conductor reads these — not writes them. Included for reference so the Conductor knows what to expect in each field.
 
 <template follow="format">
-REVIEW REQUEST (Smoothness: {X}/9):
-  Checkpoint: {N} of {M}
-  Context Usage: {XX}%
-  Self-Correction: {YES/NO} ({details if YES})
-  Deviations: {N} ({severity — description})
-  Agents Remaining: {N} (~{X}% each, ~{Y}% total)
-  Proposal: {path/to/proposal.md}
-  Summary: {what was accomplished}
-  Files Modified: {N}
-  Tests: {status} ({M} total, {N} new)
-  Key Outputs:
-    - {path/to/file.md} ({created/modified/rag-addition})
+CHECKPOINT {N}: REVIEW REQUEST
+Context Usage: {XX}%
+Self-Correction: {YES/NO}
+Deviations: {count + severity}
+Agents Remaining: {N} ({description})
+Proposal: {path or N/A}
+Summary: {what was accomplished}
+Files Modified: {count}
+Tests: {status}
+Smoothness: {0-9}
+Reason: {why review needed}
+Key Outputs:
+  - {path/to/file.md} ({created/modified/rag-addition})
 </template>
 
-<mandatory>All 10 fields are required in every review request. If any are missing, note it as a deviation in the review.</mandatory>
+<mandatory>All 11 fields are required in every review request. If any are missing, note it as a deviation in the review.</mandatory>
 </core>
 </section>
 

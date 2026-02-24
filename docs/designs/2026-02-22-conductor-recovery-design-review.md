@@ -638,16 +638,18 @@ These are things the design intentionally delegates to existing files:
 
 ## Implementation Readiness Assessment
 
-| Component | Readiness | Blocking Issues |
-|-----------|-----------|-----------------|
-| Compact Protocol | 70% | C3 (templates), I1 (SQL ref), I2 (watcher down), I6 (timeout) |
-| Recovery Bootstrap Protocol | 55% | C3 (templates), C5 (SIGTERM ordering), I4 (step order), I5 (handoff format), I8 (teammates) |
-| Initialization Changes | 80% | C1 (stop hook), C2 (souffleur row queries) |
-| musician-lifecycle.md Changes | 90% | I1 (SQL ref), I7 (high-context verification) |
-| error-recovery.md Changes | 70% | C6 (state relationship), S25 (self-detection) |
-| repetiteur-invocation.md Changes | 40% | C4 (SKILL.md section), I3 (communication protocol) |
-| Learnings File | 85% | S4 (creation policy) |
-| Cross-skill Dependencies | 75% | C2 (query updates), I9 (file inventory) |
+**Status: All findings resolved. Ready for implementation planning.**
+
+| Component | Readiness | Notes |
+|-----------|-----------|-------|
+| Compact Protocol | 100% | C3, I1, I2, I6, S3 resolved |
+| Recovery Bootstrap Protocol | 100% | C3, C5, I4, I5, I8, S7 resolved |
+| Initialization Changes | 100% | C1, C2 resolved |
+| musician-lifecycle.md Changes | 100% | I1 resolved, I7 false positive |
+| error-recovery.md Changes | 100% | C6, S25 resolved |
+| repetiteur-invocation.md Changes | 100% | C4, I3 resolved |
+| Learnings File | 100% | S4 resolved |
+| Cross-skill Dependencies | 100% | C2, I9 resolved |
 
 ---
 
@@ -716,7 +718,7 @@ The design should specify mechanism and key parameters. Full `<template>` blocks
 - Type: Background Task subagent
 - Immediate action: UPDATE task-00 `session_id` and `last_heartbeat`
 - SQL: `UPDATE orchestration_tasks SET session_id = '{SESSION_ID}', last_heartbeat = datetime('now') WHERE task_id = 'task-00';`
-- Loop: refresh `last_heartbeat` every 30s
+- Loop: refresh `last_heartbeat` every 60s (matches message-watcher cadence; both well within Souffleur's 240s staleness threshold)
 - Kill protocol: Conductor INSERTs `heartbeat_agent_shutdown` message into `orchestration_messages`. Agent polls for this message each loop iteration and exits when found.
 - Error handling: UPDATE failure → log, continue looping (transient)
 
@@ -906,4 +908,72 @@ Proposed replacement: "After loading this skill: if your invocation includes `--
 
 The Conductor detects its own context exhaustion via the same platform-level context warnings that Musicians receive. No custom monitoring infrastructure is needed — Claude Code surfaces context usage warnings naturally. When the Conductor observes it is approaching context limits, it enters the `context-exhaustion-trigger` sequence.
 
+---
+
+**S3: Defensive `kill -0` before `kill` in Compact Protocol**
+
+Use `kill -0 $PID 2>/dev/null && kill $PID` at both kill points in the Compact Protocol (Steps 1 and 5), matching the existing pattern in `error-recovery.md` stale-heartbeat-recovery. The Step 5 compact session never auto-closes (it sits idle after `/compact` finishes), so PID reuse is not a realistic risk — but the defensive check is responsible practice and maintains consistency with the rest of the skill.
+
+---
+
+**S7: Heartbeat cadence — use 60s everywhere**
+
+No cadence change between bootstrap and normal operation. The heartbeat agent uses 60s to match the message-watcher's existing cadence. Both are well within the Souffleur's 240s staleness threshold. No documentation note needed — there is no transition to document.
+
 ### All Findings Resolved
+
+---
+
+## Implementation Context
+
+Context from the design discussion that is not captured in the design document or finding resolutions above, preserved for the implementation session.
+
+### Key Technical Facts
+
+- **`/compact` is a built-in Claude Code command** — not a skill. It triggers context compaction within a session.
+- **`--resume` preserves the same session ID** — the guard clause's `session_id` assignment is a no-op on resumed sessions. `worked_by` still increments to track compaction boundaries.
+- **Souffleur export truncation** preserves the "Files Modified" summary at the top PLUS the most recent ~800k chars. The middle is cut, not the head or tail. The Conductor always gets the file inventory + recent work.
+- **The Compact Protocol Step 5 session never auto-closes** — after `/compact` finishes, the session sits idle waiting for input. The Conductor kills it. PID reuse is not a realistic risk but defensive `kill -0` is used for consistency.
+- **`$CLAUDE_SESSION_ID` is injected by the SessionStart hook** — it is a system prompt value, NOT a bash environment variable. The Conductor references it in its own context.
+- **`$SESSION_ID` in Compact Protocol refers to the child session's ID** (retrieved via SQL from `orchestration_tasks.session_id`), NOT the Conductor's own `$CLAUDE_SESSION_ID`. The S24 resolution adds explicit SQL for this.
+
+### Architecture Evolution (Design History)
+
+The design went through significant evolution during brainstorming:
+
+1. **Originally three protocols** — Compact Protocol, Context-Recovery Protocol, and Crash Recovery Protocol as separate flows.
+2. **Merged to two** — Context-Recovery and Crash Recovery merged into a unified Recovery Bootstrap Protocol when analysis showed the flows genuinely converge. The only branch point is handoff existence (Step 2).
+3. **Compact Protocol scope narrowed** — Originally had two entry points (`<external-session>` and `<conductor-session>`). The `<conductor-session>` entry point was eliminated when the Souffleur was discovered to handle Conductor recovery. The Conductor no longer manages its own compaction — it signals `context_recovery` and the Souffleur handles kill/export/relaunch.
+4. **Single flag** — Originally two flags (`--crash-recovery-protocol`, `--context-recovery-protocol`). Merged to single `--recovery-bootstrap` flag. The Souffleur's launch prompt text provides crash vs planned context via `{RECOVERY_REASON}` substitution.
+
+### Repetiteur Externalization Scope
+
+The Repetiteur skill itself is unbuilt. The Conductor-side changes to `repetiteur-invocation.md` must be implemented fully so the Repetiteur skill has a complete template to work from. Key Conductor-side specs:
+
+- Kitty launch with PID capture to `temp/repetiteur.pid`
+- `repetiteur_conversation` table DDL (in initialization.md)
+- Polling protocol: sender values (`conductor`, `repetiteur`, `user`), `WHERE id > $LAST_READ_ID AND sender != $SELF ORDER BY id`, ~3s polling
+- Conversation end signal: `[HANDOFF]` prefix on Repetiteur's final message
+- Compaction via Compact Protocol using `temp/repetiteur.pid` and session ID tracked in Conductor state (no DB row)
+- Recovery Bootstrap Step 6 triage: kill orphaned Repetiteur via PID file
+
+### Stale Artifacts Removed
+
+- `docs/plans/2026-02-21-context-recovery-implementation.md` — deleted. This was the old Souffleur-side plan with dual-flag pattern (`--crash-recovery-protocol`/`--context-recovery-protocol`). Caused review agent confusion.
+
+### File Inventory (Complete)
+
+**New files to create:**
+- `skill/references/compact-protocol.md`
+- `skill/references/recovery-bootstrap.md`
+
+**Existing files to modify:**
+- `skill/SKILL.md` — Protocol registry (+2), preamble bypass, `context_recovery` state docs, `repetiteur-protocol` section rewrite
+- `skill/references/initialization.md` — Schema (CHECK constraint +2 states, Souffleur row, `repetiteur_conversation` table), Souffleur launch step, hard gate, message watcher launch
+- `skill/references/musician-lifecycle.md` — `context-exhaustion-flow` redirect to Compact Protocol, `handoff-types` table update
+- `skill/references/error-recovery.md` — New `context-exhaustion-trigger` section, `context-warning-protocol` addition (not "minor update")
+- `skill/references/repetiteur-invocation.md` — Externalization (Kitty launch, conversation table, PID management, compaction capability)
+- `skill/references/phase-execution.md` — Souffleur row exclusion in monitoring queries, learnings file touchpoint
+- `skill/references/completion.md` — Souffleur row exclusion
+- `skill/references/review-protocol.md` — Learnings file touchpoint
+- `tools/implementation-hook/stop-hook.sh` — Add `context_recovery` to terminal states

@@ -1,4 +1,4 @@
-<skill name="conductor-example-review-approval-workflow" version="3.0">
+<skill name="conductor-example-review-approval-workflow" version="4.0">
 
 <metadata>
 type: example
@@ -39,7 +39,7 @@ Monitoring subagent reports: "task-03 state changed to needs_review"
 ```sql
 SELECT task_id, from_session, message, timestamp
 FROM orchestration_messages
-WHERE task_id = 'task-03'
+WHERE task_id = 'task-03' AND message_type = 'review_request'
 ORDER BY timestamp DESC
 LIMIT 1;
 ```

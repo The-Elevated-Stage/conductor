@@ -72,7 +72,7 @@ Query for active tasks:
 ```sql
 SELECT task_id FROM orchestration_tasks
 WHERE state IN ('working', 'needs_review', 'review_approved', 'review_failed', 'fix_proposed')
-AND task_id != 'task-00';
+AND task_id NOT IN ('task-00', 'souffleur');
 ```
 </template>
 

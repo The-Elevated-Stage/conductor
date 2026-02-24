@@ -1,4 +1,4 @@
-<skill name="conductor-example-monitoring-subagent-prompts" version="3.0">
+<skill name="conductor-example-monitoring-subagent-prompts" version="4.0">
 
 <metadata>
 type: example

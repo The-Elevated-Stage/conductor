@@ -1,4 +1,4 @@
-<skill name="conductor-example-launching-execution-sessions" version="3.0">
+<skill name="conductor-example-launching-execution-sessions" version="4.0">
 
 <metadata>
 type: example

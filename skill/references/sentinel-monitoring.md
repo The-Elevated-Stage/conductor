@@ -1,4 +1,4 @@
-<skill name="conductor-sentinel-monitoring" version="3.0">
+<skill name="conductor-sentinel-monitoring" version="4.0">
 
 <metadata>
 type: reference

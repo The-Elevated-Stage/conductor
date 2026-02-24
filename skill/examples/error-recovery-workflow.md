@@ -1,4 +1,4 @@
-<skill name="conductor-example-error-recovery-workflow" version="3.0">
+<skill name="conductor-example-error-recovery-workflow" version="4.0">
 
 <metadata>
 type: example
@@ -38,7 +38,7 @@ Monitoring subagent reports: "task-05 state changed to error, retry_count = 1"
 ```sql
 SELECT task_id, from_session, message, timestamp
 FROM orchestration_messages
-WHERE task_id = 'task-05'
+WHERE task_id = 'task-05' AND message_type = 'error'
 ORDER BY timestamp DESC
 LIMIT 1;
 ```

@@ -78,7 +78,7 @@ When the background watcher detects `error` state on a task:
 ### Step 1: Check last_error field
 ```sql
 SELECT task_id, state, last_error, retry_count FROM orchestration_tasks
-WHERE state = 'error' AND task_id != 'task-00';
+WHERE state = 'error' AND task_id NOT IN ('task-00', 'souffleur');
 ```
 
 If `last_error = 'context_exhaustion_warning'`, go to context-warning-protocol section instead.

@@ -1,4 +1,4 @@
-<skill name="conductor-example-initialization" version="3.0">
+<skill name="conductor-example-initialization" version="4.0">
 
 <metadata>
 type: example
@@ -14,6 +14,8 @@ tier: 3
 - load-readmes
 - load-memory
 - initialize-database
+- souffleur-launch
+- message-watcher-launch
 - verify-hooks
 - user-approval-gate
 </sections>
@@ -113,16 +115,19 @@ Via comms-link execute:
 
 <template follow="format">
 ```sql
--- Core DDL shown here. Full DDL (including indexes) is in references/initialization.md.
+-- Core DDL shown here. Full canonical DDL is in references/initialization.md.
 DROP TABLE IF EXISTS orchestration_tasks;
 DROP TABLE IF EXISTS orchestration_messages;
+DROP TABLE IF EXISTS repetiteur_conversation;
 
 CREATE TABLE orchestration_tasks (
     task_id TEXT PRIMARY KEY,
     state TEXT NOT NULL CHECK (state IN (
         'watching', 'reviewing', 'exit_requested', 'complete',
         'working', 'needs_review', 'review_approved', 'review_failed',
-        'error', 'fix_proposed', 'exited'
+        'error', 'fix_proposed', 'exited',
+        'context_recovery',
+        'confirmed'
     )),
     instruction_path TEXT,
     session_id TEXT,
@@ -143,13 +148,30 @@ CREATE TABLE orchestration_messages (
     message_type TEXT CHECK (message_type IN (
         'review_request', 'error', 'context_warning', 'completion',
         'emergency', 'handoff', 'approval', 'fix_proposal',
-        'rejection', 'instruction', 'claim_blocked', 'resumption'
+        'rejection', 'instruction', 'claim_blocked', 'resumption',
+        'system'
     )),
     timestamp TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE repetiteur_conversation (
+    id INTEGER PRIMARY KEY,
+    sender TEXT NOT NULL,
+    message TEXT NOT NULL,
+    timestamp TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Insert infrastructure rows (souffleur BEFORE conductor)
+INSERT INTO orchestration_tasks (task_id, state, last_heartbeat)
+VALUES ('souffleur', 'watching', datetime('now'));
+
 INSERT INTO orchestration_tasks (task_id, state, last_heartbeat)
 VALUES ('task-00', 'watching', datetime('now'));
+
+-- Indexes for query performance
+CREATE INDEX idx_messages_task_time ON orchestration_messages(task_id, timestamp);
+CREATE INDEX idx_messages_type ON orchestration_messages(message_type);
+CREATE INDEX idx_tasks_state_heartbeat ON orchestration_tasks(state, last_heartbeat);
 ```
 </template>
 
@@ -157,14 +179,46 @@ VALUES ('task-00', 'watching', datetime('now'));
 Verify:
 ```sql
 SELECT * FROM orchestration_tasks;
--- Expected: 1 row, task-00, state=watching
+-- Expected: 2 rows — souffleur (watching), task-00 (watching)
 ```
+</core>
+</section>
+
+<section id="souffleur-launch">
+<core>
+## Step 7: Launch Souffleur
+
+Discover own kitty PID via process tree walk (see RAG: "kitty PID discovery"), then launch:
+
+```bash
+kitty --directory /home/kyle/claude/remindly \
+  --title "Souffleur" \
+  -- env -u CLAUDECODE claude \
+  --permission-mode acceptEdits \
+  "/souffleur PID:$KITTY_PID SESSION_ID:$CLAUDE_SESSION_ID" &
+```
+
+Hard gate — poll until Souffleur confirms:
+```sql
+SELECT state FROM orchestration_tasks WHERE task_id = 'souffleur';
+-- Wait for: state = 'confirmed'
+```
+
+Do not proceed until confirmed. If `error`, read diagnostic and retry. After 3 failures, report to user.
+</core>
+</section>
+
+<section id="message-watcher-launch">
+<core>
+## Step 8: Launch Message Watcher
+
+After Souffleur is confirmed, launch the background message watcher before hook verification or user approval. This provides event detection for state changes and heartbeat refreshing.
 </core>
 </section>
 
 <section id="verify-hooks">
 <core>
-## Step 7: Verify Hooks and Database
+## Step 9: Verify Hooks and Database
 
 Hooks self-configure via `hooks.json` preset detection. No manual setup.sh step needed.
 
@@ -191,7 +245,7 @@ test -f comms.db && echo "Database ready"
 
 <section id="user-approval-gate">
 <core>
-## Step 8: User Approval Gate
+## Step 10: User Approval Gate
 
 Present the plan overview to the user (from Overview and Phase Summary sections read in Step 1):
 

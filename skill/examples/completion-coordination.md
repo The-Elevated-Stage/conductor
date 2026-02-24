@@ -1,4 +1,4 @@
-<skill name="conductor-example-completion-coordination" version="3.0">
+<skill name="conductor-example-completion-coordination" version="4.0">
 
 <metadata>
 type: example
@@ -40,7 +40,7 @@ Phase 3 is also complete. All implementation tasks are done.
 ```sql
 SELECT task_id, state, completed_at, report_path
 FROM orchestration_tasks
-WHERE task_id != 'task-00'
+WHERE task_id NOT IN ('task-00', 'souffleur')
 ORDER BY task_id;
 ```
 

@@ -19,6 +19,7 @@ protocol: Repetiteur Protocol
 - passthrough-communication
 - escalation-context
 - handoff-reception
+- compact-ready-reception
 - task-annotation-matching
 - plan-changeover
 - superseded-plan-handling
@@ -361,6 +362,60 @@ If the handoff is NOT received (Repetiteur crash or conversation table silence):
 </mandatory>
 </section>
 
+<section id="compact-ready-reception">
+<mandatory>
+## Compact-Ready Reception
+
+The Repetiteur signals context exhaustion recovery via a `[COMPACT_READY]` message in the `repetiteur_conversation` table. This uses the same polling mechanism as `[HANDOFF]` detection.
+
+### Detection
+
+<template follow="exact">
+```sql
+SELECT id, message FROM repetiteur_conversation
+WHERE sender = 'repetiteur'
+AND message LIKE '[COMPACT_READY]%'
+ORDER BY id DESC LIMIT 1;
+```
+</template>
+
+### Signal Format
+
+`[COMPACT_READY] Checkpoint written: {journal_path}. Current stage: {stage_name}.`
+
+- `{journal_path}` — Absolute path to the consultation journal containing the checkpoint (e.g., `docs/plans/designs/decisions/feature-name/consultation-1-journal.md`)
+- `{stage_name}` — One of: `ingestion`, `impact-assessment`, `resolution`, `verification`, `handoff-prep`
+
+### Relaunch Procedure
+
+1. Kill the Repetiteur's Kitty session:
+
+<template follow="exact">
+```bash
+PID=$(cat temp/repetiteur.pid 2>/dev/null)
+if [ -n "$PID" ] && kill -0 $PID 2>/dev/null; then
+    kill $PID
+fi
+rm -f temp/repetiteur.pid
+```
+</template>
+
+2. Relaunch a new Kitty session with the same `/repetiteur` invocation. Include in the spawn prompt:
+   - The original blocker report (same as initial invocation)
+   - The checkpoint journal path from the `[COMPACT_READY]` message
+   - The current stage from the `[COMPACT_READY]` message
+   - An instruction that this is a resumed consultation, not a new one
+
+The restarted Repetiteur reads its own checkpoint from the journal and resumes from the indicated stage.
+
+### Properties
+
+- **One-way signal:** Like `[HANDOFF]`, no reply is expected in the conversation table. The Conductor acts on it directly.
+- **Timing:** Can occur at any point during the consultation — typically once, but can occur multiple times for unusually large consultations.
+- **Journal is the recovery mechanism:** The checkpoint in the journal is what allows the new session to resume. The `[COMPACT_READY]` message is just the trigger for the Conductor to act.
+</mandatory>
+</section>
+
 <section id="task-annotation-matching">
 <mandatory>
 ## Task Annotation Matching
@@ -462,7 +517,7 @@ fi
 The previous plan may still be in `docs/plans/designs/` (not yet moved to `superseded/`), and the new plan may be committed but the Conductor doesn't know about it. Report to user — the state is recoverable (user can inspect directory and complete transition manually or restart consultation).
 
 ### Context Exhaustion
-The Repetiteur can be compacted via the Compact Protocol on context exhaustion (same pattern as Musicians, but using `temp/repetiteur.pid` and tracking session ID in Conductor state rather than a database row).
+The Repetiteur signals context exhaustion via a `[COMPACT_READY]` message in the `repetiteur_conversation` table. The Conductor detects this signal and relaunches the Repetiteur with its checkpoint journal — see the compact-ready-reception section for the full protocol.
 
 <mandatory>In all error scenarios where the handoff was never sent, the previous plan remains the active plan from the Conductor's perspective. MEMORY.md was not updated, so the plan reference is still correct.</mandatory>
 </core>

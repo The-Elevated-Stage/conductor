@@ -601,11 +601,31 @@ States MUST be set to `exited` BEFORE sending SIGTERM. The stop hook blocks sess
 </mandatory>
 
 <core>
-### Step 4: Set context_recovery State
+### Step 4: Write Context Recovery Payload
+
+Write a structured payload for the Souffleur before triggering recovery. The Souffleur reads this payload to configure the recovery provider (Lethe or claude_export) with the Conductor's preferred settings.
+
+```sql
+INSERT INTO orchestration_messages (task_id, from_session, message, message_type)
+VALUES (
+    'souffleur',
+    'task-00',
+    'CONTEXT_RECOVERY_PAYLOAD_V1
+permission_mode: acceptEdits
+resume_prompt: /conductor --recovery-bootstrap
+
+The session history was cleaned, review handoff documents and resume plan implementation.',
+    'instruction'
+);
+```
+
+<mandatory>The payload MUST be written BEFORE the `context_recovery` state update in Step 5. The Souffleur reads the latest payload from `orchestration_messages` when it detects the state change. If the payload is missing, the Souffleur applies its own defaults.</mandatory>
+
+### Step 5: Set context_recovery State
 </core>
 
 <mandatory>
-This MUST be the last step — after all Musicians are closed and all handoff data is written.
+This MUST be the last step — after all Musicians are closed, all handoff data is written, and the recovery payload is inserted.
 
 ```sql
 UPDATE orchestration_tasks
@@ -613,7 +633,7 @@ SET state = 'context_recovery', last_heartbeat = datetime('now')
 WHERE task_id = 'task-00';
 ```
 
-Setting `context_recovery` is the Souffleur's kill trigger. After this state is set, the Souffleur will terminate this Conductor session and launch a replacement. No further actions should be taken after this UPDATE — the session is effectively dead.
+Setting `context_recovery` is the Souffleur's kill trigger. After this state is set, the Souffleur will terminate this Conductor session and initiate recovery (via Lethe compaction or claude_export relaunch, depending on provider availability). No further actions should be taken after this UPDATE — the session is effectively dead.
 </mandatory>
 </section>
 

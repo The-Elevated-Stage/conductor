@@ -149,7 +149,7 @@ CREATE TABLE orchestration_messages (
         'review_request', 'error', 'context_warning', 'completion',
         'emergency', 'handoff', 'approval', 'fix_proposal',
         'rejection', 'instruction', 'claim_blocked', 'resumption',
-        'system'
+        'system', 'warning'
     )),
     timestamp TEXT DEFAULT CURRENT_TIMESTAMP
 );

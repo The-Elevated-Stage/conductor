@@ -32,9 +32,9 @@ protocol: Recovery Bootstrap Protocol
 
 ## Purpose
 
-Unified recovery flow for the Conductor after crash or planned context handoff. This is a completely new session — no resumed context, no old teammates or agents accessible. The protocol reconstructs full situational awareness from five sources:
+Unified recovery flow for the Conductor after crash or planned context handoff. This may be a completely new session (claude_export provider) or a resumed compacted session (Lethe provider). In either case, all previous teammates and subagents are gone — this is a fresh orchestration context. The protocol reconstructs full situational awareness from available sources:
 
-1. Souffleur's export file (previous session history)
+1. Souffleur's export file (previous session history, when present)
 2. Handoff document (if exists — written by the dying Conductor)
 3. MEMORY.md (plan path, active orchestration state)
 4. comms-link database (task states, message history)
@@ -115,7 +115,11 @@ This agent serves two purposes: the Souffleur discovers the new session ID by po
 <core>
 ## Step 1: Read Session Summary
 
-Read the export file at the path provided via `{EXPORT_PATH}` substitution in the Souffleur's launch prompt. Format is clean markdown with a "Files Modified" summary at the top (per Souffleur `conductor-relaunch.md`).
+The Souffleur may recover the Conductor via different providers. The export file is present when the claude_export provider was used, but absent when the Lethe provider compacted the session in-place.
+
+**If no export path is present in the launch context** (Lethe provider path): The Conductor entered recovery with resumed compacted context. The existing context from compaction provides the broad situational awareness that the export normally supplies. Proceed directly to Step 2.
+
+**If export path is present** (claude_export provider path): Read the export file at the path provided via `{EXPORT_PATH}` substitution in the Souffleur's launch prompt. Format is clean markdown with a "Files Modified" summary at the top (per Souffleur `conductor-relaunch.md`).
 
 **Truncation behavior:** Souffleur preserves the "Files Modified" summary at the top PLUS the most recent ~800k chars. The middle of the conversation is cut, not the head or tail. The Conductor always gets the file inventory plus recent work.
 
@@ -450,7 +454,7 @@ Five explicit exclusions:
 2. **Does not recreate DB tables** — schema verification only; existing data is the source of truth
 3. **Does not wait for user approval** — already granted during original initialization
 4. **Does not re-launch the Souffleur** — it is already running; it launched this Conductor
-5. **Does not have access to old teammates or subagents** — this is a completely new session; all previous teammates and subagents are gone
+5. **Does not have access to old teammates or subagents** — regardless of recovery provider, all previous teammates and subagents are gone; this is a fresh orchestration context even if session history was compacted
 </mandatory>
 </section>
 

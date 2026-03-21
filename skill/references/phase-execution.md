@@ -9,6 +9,7 @@ protocol: Phase Execution Protocol
 
 <sections>
 - plan-consumption
+- authority-tag-interpretation
 - danger-file-assessment
 - task-decomposition
 - copyist-launch-template
@@ -43,6 +44,26 @@ Both are read using the line ranges from the plan-index parsed during initializa
 The phase section provides the implementation content needed for task decomposition and review context. The conductor-review section provides verification items the Conductor must check after the phase completes.
 
 <mandatory>Do not read future phase sections. Only the current phase is loaded. When the phase completes and the conductor-review checklist passes, move to the next phase and read its sections fresh.</mandatory>
+</core>
+</section>
+
+<section id="authority-tag-interpretation">
+<core>
+## Authority Tag Interpretation
+
+Phase sections and conductor-review sections use authority tags to classify content. The Conductor interprets these tags differently depending on where they appear.
+
+**In phase sections** (consumed for task decomposition):
+- `<mandatory>` — Non-negotiable constraints with plan-level authority. NOT modifiable by the Conductor, even within intra-phase authority. Preserved verbatim through the Copyist into task instructions.
+- `<core>` — Primary implementation content. The substance to be decomposed into tasks.
+- `<guidance>` — Recommendations the Conductor can adapt based on runtime conditions (task ordering, parallelization strategy, tool choices).
+- `<context>` — Background information. Informational only, no action required.
+
+**In conductor-review sections** (consumed for phase-completion verification):
+- `<mandatory>` — Hard verification gates. Must pass before proceeding to the next phase.
+- `<guidance>` — Non-blocking recommendations. The Conductor should consider them but can proceed if they are not fully satisfied.
+
+**User override flags:** Conductor-review sections may contain override flags in the format: `USER OVERRIDE: [setting] set to X despite research indicating Y — user has workaround, see journal entry [ref]`. Propagate these to the Copyist's Overrides & Learnings section in the launch prompt, but do not block on them.
 </core>
 </section>
 

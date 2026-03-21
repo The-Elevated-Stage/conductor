@@ -11,6 +11,7 @@ protocol: Initialization Protocol
 - bootstrap-steps
 - plan-index-verification
 - plan-bootstrap-reading
+- plan-document-structure
 - user-approval-gate
 - database-initialization
 - souffleur-launch
@@ -106,11 +107,13 @@ The Arranger's plan-index at the top of the implementation plan is both a map an
 
 **Parse line ranges:** The plan-index contains entries like:
 ```
+<!-- overview lines:NN-NN -->
+<!-- phase-summary lines:NN-NN -->
 <!-- phase:1 lines:NN-NN title:"Phase Title" -->
 <!-- conductor-review:1 lines:NN-NN -->
 ```
 
-These line ranges are used throughout the orchestration to selectively read plan sections without loading the full document.
+The `overview` and `phase-summary` entries provide direct line-range access for bootstrap reading. The `phase:N` and `conductor-review:N` entries are used during phase execution. These line ranges are used throughout the orchestration to selectively read plan sections without loading the full document.
 
 **Verify timestamp:** The `<!-- verified:YYYY-MM-DDTHH:MM:SS -->` entry confirms when finalization occurred.
 
@@ -128,10 +131,35 @@ At bootstrap, only three sections are loaded:
 2. **Overview** — what we're building, why, end goals, constraints. Comprehensive enough to understand the full picture without reading phase sections.
 3. **Phase Summary** — quick reference for what each phase covers, dependencies, parallelization opportunities. The Conductor's map of the work.
 
-These are read via the line ranges from the plan-index. Context cost is small — typically 1-3k tokens total.
+These are read via their dedicated plan-index entries (`<!-- overview lines:NN-NN -->` and `<!-- phase-summary lines:NN-NN -->`). Context cost is small — typically 1-3k tokens total.
 
 Individual phase sections are read on-demand when each phase begins, handled by the Phase Execution Protocol. This keeps the Conductor's bootstrap context lean.
 </core>
+</section>
+
+<section id="plan-document-structure">
+<context>
+## Plan Document Structure
+
+The implementation plan is a Tier 2 hybrid document with the following structural elements:
+
+- **YAML frontmatter** — Machine-parseable metadata at the top of the file:
+  ```yaml
+  title: "[Feature] Implementation Plan"
+  date: YYYY-MM-DD
+  type: implementation-plan      # or: remaining-plan
+  tier: 2
+  feature: "{feature-name}"
+  design-doc: "docs/plans/designs/{design-doc-name}.md"
+  ```
+  The `feature` field matches the feature name used for the decisions directory (`decisions/{feature-name}/`) and branch naming. The Conductor currently derives these from the Overview section or MEMORY.md — YAML frontmatter provides a machine-parseable source.
+
+- **`<sections>` index** — Lists all section IDs in the document. Provides fallback navigation alongside the sentinel/plan-index system.
+
+- **`<section id="...">` tags** — Each phase section is wrapped in `<section id="phase-N">` tags that coexist with sentinel markers. Sentinel markers + plan-index remain the primary navigation system. `<section>` tags provide structural validation and fallback if plan-index line ranges become stale (e.g., after a partial edit that shifts line numbers).
+
+- **Authority tags** — `<mandatory>`, `<core>`, `<guidance>`, `<context>` within phase and conductor-review sections. See the Phase Execution Protocol's authority-tag-interpretation section for how the Conductor interprets these.
+</context>
 </section>
 
 <section id="user-approval-gate">
@@ -192,7 +220,7 @@ CREATE TABLE orchestration_messages (
         'review_request', 'error', 'context_warning', 'completion',
         'emergency', 'handoff', 'approval', 'fix_proposal',
         'rejection', 'instruction', 'claim_blocked', 'resumption',
-        'system'
+        'system', 'warning'
     )),
     timestamp TEXT DEFAULT CURRENT_TIMESTAMP
 );
@@ -321,7 +349,7 @@ If columns are missing or tables don't exist: drop and recreate using the DDL ab
 | `task_id` | TEXT | Which task this message relates to |
 | `from_session` | TEXT | Who sent the message (session ID or `task-00` for conductor) |
 | `message` | TEXT | Free-text message content |
-| `message_type` | TEXT | Enum for filtering without parsing body |
+| `message_type` | TEXT | Enum for filtering without parsing body. Includes `'warning'` — emitted by the Souffleur for degraded monitoring mode (PID resolution failure, export gate escalation). Warning messages are informational and do not trigger Conductor-side recovery loops. |
 | `timestamp` | TEXT | Auto-set to CURRENT_TIMESTAMP |
 </core>
 </section>

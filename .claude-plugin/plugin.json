@@ -1,0 +1,13 @@
+{
+  "name": "conductor",
+  "description": "Multi-task coordination for Claude Code orchestration",
+  "version": "1.0.0",
+  "author": {
+    "name": "The Elevated Stage",
+    "url": "https://github.com/The-Elevated-Stage"
+  },
+  "homepage": "https://github.com/The-Elevated-Stage/conductor",
+  "repository": "https://github.com/The-Elevated-Stage/conductor.git",
+  "license": "MIT",
+  "keywords": ["orchestration", "coordination", "multi-task", "elevated-stage"]
+}

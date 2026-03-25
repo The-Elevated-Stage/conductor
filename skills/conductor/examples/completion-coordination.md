@@ -234,20 +234,25 @@ Waiting for your feedback.
 
 <section id="close-musician-windows">
 <core>
-## Step 9: Close Musician Windows
+## Step 9: Shutdown Heartbeat Teammate and Close Musician Sessions
 
-Close all remaining Musician kitty windows:
-
-```bash
-# For each task
-kill $(cat temp/musician-task-01.pid) 2>/dev/null
-rm -f temp/musician-task-01.pid
-kill $(cat temp/musician-task-03.pid) 2>/dev/null
-rm -f temp/musician-task-03.pid
-# ... repeat for task-04 through task-10
+Shutdown the heartbeat teammate:
+```sql
+INSERT INTO orchestration_messages (task_id, from_session, message, message_type) VALUES (
+    'task-00', 'task-00', 'heartbeat_teammate_shutdown', 'system');
 ```
 
-Return to SKILL.md and locate the Musician Lifecycle Protocol if any windows require special handling.
+Close all remaining Musician sessions via the session layer:
+```bash
+source scripts/session-commands.sh
+destroy_session "musician-primary"
+PID=$(cat temp/window-musician-primary.pid 2>/dev/null)
+[[ -n "$PID" ]] && kill "$PID" 2>/dev/null || true
+rm -f temp/window-musician-primary.pid
+# Repeat for any remaining parallel windows
+```
+
+Return to SKILL.md and locate the Musician Lifecycle Protocol if any sessions require special handling.
 </core>
 </section>
 

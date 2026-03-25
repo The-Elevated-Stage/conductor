@@ -15,7 +15,7 @@ tier: 3
 - verify-database
 - insert-instruction-messages
 - launch-verification-watcher
-- launch-kitty-windows
+- launch-sessions
 - wait-for-events
 - phase-complete
 </sections>
@@ -115,62 +115,57 @@ Failure: Any remain 'watching' after 5 minutes → report which failed.
 </core>
 </section>
 
-<section id="launch-kitty-windows">
+<section id="launch-sessions">
 <core>
-## Step 4: Launch Kitty Windows
+## Step 4: Launch Sessions
 
-Launch one kitty window per task via the Bash tool. Use parallel Bash calls so all sessions start simultaneously:
+Write prompts to files and launch via session layer. Task 1 uses the long-term primary window; tasks 2-N get temporary windows.
 </core>
 
-<mandatory>Use the musician skill launch prompt template for each session.</mandatory>
+<mandatory>Use the musician skill launch prompt template for each session. See references/phase-execution.md → musician-launch for the canonical template.</mandatory>
 
-<template follow="exact">
+<core>
 ```bash
-# Bash call 1:
-kitty --directory /home/kyle/claude/remindly --title "Musician: task-03" -- env -u CLAUDECODE claude --permission-mode acceptEdits "/musician
+# Write prompt files
+cat > temp/task-03-prompt.txt << 'PROMPT'
+/musician
 
 Load the musician skill first, then proceed.
 
 **Your task:**
-
 Run this SQL query via comms-link:
 SELECT message FROM orchestration_messages WHERE task_id = 'task-03' AND message_type = 'instruction';
-
-Read the returned message. It contains your complete task instructions for this phase. Follow every step, checkpoint, and requirement exactly as specified.
+Read the returned message. Follow every step exactly.
 
 **Context:**
 - Task ID: task-03
 - Phase: 2 — Extraction Tasks
+PROMPT
 
-Do not proceed without reading the full instruction message. All steps are there." &
-echo $! > temp/musician-task-03.pid
-```
-</template>
+# Same pattern for task-04, task-05, task-06 prompt files
 
-<core>
-```bash
-# Bash call 2 (parallel):
-kitty --directory /home/kyle/claude/remindly --title "Musician: task-04" -- env -u CLAUDECODE claude --permission-mode acceptEdits "/musician
+# Launch via session layer
+source scripts/session-commands.sh
 
-Load the musician skill first, then proceed.
+# Task-03: primary window (long-term, reused across phases)
+create_session "musician-primary" "$PROJECT_DIR"
+ATTACH_CMD=$(get_terminal_cmd "musician-primary")
+WINDOW_PID=$(TERMINAL_CMD=$TERMINAL_CMD scripts/launch-terminal.sh \
+    --title "Musician: primary" --dir "$PROJECT_DIR" --cmd "$ATTACH_CMD")
+echo "$WINDOW_PID" > temp/window-musician-primary.pid
+inject_session "musician-primary" \
+    "env -u CLAUDECODE claude --permission-mode $MUSICIAN_PERMISSIONS -p \"\$(cat temp/task-03-prompt.txt)\""
 
-**Your task:**
+# Task-04: temporary parallel window
+create_session "musician-task-04" "$PROJECT_DIR"
+ATTACH_CMD=$(get_terminal_cmd "musician-task-04")
+WINDOW_PID=$(TERMINAL_CMD=$TERMINAL_CMD scripts/launch-terminal.sh \
+    --title "Musician: task-04" --dir "$PROJECT_DIR" --cmd "$ATTACH_CMD")
+echo "$WINDOW_PID" > temp/window-musician-task-04.pid
+inject_session "musician-task-04" \
+    "env -u CLAUDECODE claude --permission-mode $MUSICIAN_PERMISSIONS -p \"\$(cat temp/task-04-prompt.txt)\""
 
-Run this SQL query via comms-link:
-SELECT message FROM orchestration_messages WHERE task_id = 'task-04' AND message_type = 'instruction';
-
-Read the returned message. It contains your complete task instructions for this phase. Follow every step, checkpoint, and requirement exactly as specified.
-
-**Context:**
-- Task ID: task-04
-- Phase: 2 — Extraction Tasks
-
-Do not proceed without reading the full instruction message. All steps are there." &
-echo $! > temp/musician-task-04.pid
-```
-
-```bash
-# Bash calls 3 & 4 (parallel): Same pattern with task-05 and task-06, each with PID capture
+# Same pattern for task-05 and task-06 as temporary windows
 ```
 
 All sessions coordinate autonomously via comms-link database.
@@ -178,9 +173,9 @@ All sessions coordinate autonomously via comms-link database.
 
 <context>
 **Launch notes:**
-- Each `kitty --directory /home/kyle/claude/remindly --title "..." -- env -u CLAUDECODE claude --permission-mode acceptEdits "..."` opens a new OS window running claude with the musician prompt
-- The `&` suffix detaches kitty so the Bash call returns immediately
-- Use parallel Bash tool calls (one per kitty window) for simultaneous launch
+- `get_terminal_cmd` returns the appropriate attach/loop command for the configured session layer (tmux or FIFO)
+- `launch-terminal.sh` opens a terminal window using the configured `TERMINAL_CMD` (kitty, alacritty, foot, etc.)
+- `inject_session` sends the claude command into the session — for tmux this uses `send-keys`, for FIFO it writes to the named pipe
 - The verification watcher (step 3) is already running and will confirm all sessions claimed their tasks
 </context>
 </section>

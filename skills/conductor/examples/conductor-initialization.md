@@ -20,7 +20,7 @@ tier: 3
 - initialize-database
 - souffleur-launch
 - message-watcher-launch
-- verify-hooks
+- heartbeat-teammate-launch
 - user-approval-gate
 </sections>
 
@@ -192,14 +192,23 @@ SELECT * FROM orchestration_tasks;
 <core>
 ## Step 7: Launch Souffleur
 
-Discover own kitty PID via process tree walk (see RAG: "kitty PID discovery"), then launch:
+Discover own terminal PID via process tree walk, then launch via session layer:
 
 ```bash
-kitty --directory /home/kyle/claude/remindly \
-  --title "Souffleur" \
-  -- env -u CLAUDECODE claude \
-  --permission-mode acceptEdits \
-  "/souffleur PID:$KITTY_PID SESSION_ID:$CLAUDE_SESSION_ID" &
+# Write prompt to file
+cat > temp/souffleur-prompt.txt << PROMPT
+/souffleur PID:$TERMINAL_PID SESSION_ID:$CLAUDE_SESSION_ID
+PROMPT
+
+# Launch via session layer
+source scripts/session-commands.sh
+create_session "souffleur" "$PROJECT_DIR"
+ATTACH_CMD=$(get_terminal_cmd "souffleur")
+WINDOW_PID=$(TERMINAL_CMD=$TERMINAL_CMD scripts/launch-terminal.sh \
+    --title "Souffleur" --dir "$PROJECT_DIR" --cmd "$ATTACH_CMD")
+echo "$WINDOW_PID" > temp/window-souffleur.pid
+inject_session "souffleur" \
+    "env -u CLAUDECODE claude --permission-mode $SOUFFLEUR_PERMISSIONS -p \"\$(cat temp/souffleur-prompt.txt)\""
 ```
 
 Hard gate — poll until Souffleur confirms:
@@ -216,35 +225,16 @@ Do not proceed until confirmed. If `error`, read diagnostic and retry. After 3 f
 <core>
 ## Step 8: Launch Message Watcher
 
-After Souffleur is confirmed, launch the background message watcher before hook verification or user approval. This provides event detection for state changes and heartbeat refreshing.
+After Souffleur is confirmed, launch the background message watcher before user approval. This provides event detection for state changes and heartbeat refreshing.
 </core>
 </section>
 
-<section id="verify-hooks">
+<section id="heartbeat-teammate-launch">
 <core>
-## Step 9: Verify Hooks and Database
+## Step 9: Launch Heartbeat Teammate
 
-Hooks self-configure via `hooks.json` preset detection. No manual setup.sh step needed.
-
-Verify hook files exist:
-```bash
-# SessionStart hook script
-test -f tools/implementation-hook/session-start-hook.sh && echo "SessionStart hook found"
-
-# Stop hook (configured via hooks.json preset)
-test -f tools/implementation-hook/stop-hook.sh && echo "Stop hook found"
-
-# Hook configuration file
-test -f tools/implementation-hook/hooks.json && echo "hooks.json found"
-
-# Database is initialized and accessible
-test -f comms.db && echo "Database ready"
-```
+After the message watcher, launch the permanent heartbeat teammate. This silent watchdog monitors the Conductor's heartbeat and sends CRITICAL interrupts via SendMessage if it goes stale. See `references/initialization.md` → `heartbeat-teammate-launch` for the full prompt.
 </core>
-
-<context>
-**Expected behavior:** When conductor session starts, SessionStart hook automatically injects `$CLAUDE_SESSION_ID` into the system prompt (available as a value, not a bash env var). Stop hook (via preset) monitors session state and blocks exit until task is in terminal state.
-</context>
 </section>
 
 <section id="user-approval-gate">

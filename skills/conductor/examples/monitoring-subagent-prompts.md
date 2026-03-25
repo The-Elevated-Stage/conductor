@@ -1,5 +1,9 @@
 <skill name="conductor-example-monitoring-subagent-prompts" version="4.0">
 
+<context>
+**Note (v5.0):** This example predates the universality update. References to "kitty windows" should be read as "Musician sessions" — session management now uses the session layer (references/session-layer.md).
+</context>
+
 <metadata>
 type: example
 parent-skill: conductor

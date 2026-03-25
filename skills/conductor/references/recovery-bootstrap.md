@@ -145,13 +145,10 @@ If the handoff file does not exist, the previous Conductor crashed without writi
 2. **Implementation plan: Overview section** (via plan-index line range)
 3. **Implementation plan: Phase Summary section** (via plan-index line range)
 4. **Current phase section** (determined from DB in Step 5 — defer this read)
-5. `docs/README.md`
-6. `docs/knowledge-base/README.md`
-7. `docs/implementation/README.md`
-8. `docs/implementation/proposals/README.md`
-9. `docs/scratchpad/README.md`
+5. `docs/README.md` (if present)
+6. Scan for other top-level READMEs in the project root (if present)
 
-This mirrors what the Initialization Protocol loads at bootstrap. The goal is to reach the same baseline understanding that a fresh Conductor would have after initialization.
+This mirrors what the Initialization Protocol loads at bootstrap (Step 4: Load Project Context). The goal is to reach the same baseline understanding that a fresh Conductor would have after initialization. No hardcoded list — different projects have different structures.
 </core>
 
 <guidance>
@@ -234,7 +231,7 @@ Parallel reads where possible. This step builds the complete operational picture
 
 **Parallel group 2 — Database verification:**
 - Schema verification: `PRAGMA table_info(orchestration_tasks)` and `PRAGMA table_info(orchestration_messages)` — confirm tables and columns exist. Do NOT recreate tables.
-- Hook verification: confirm `hooks.json`, `session-start-hook.sh`, `stop-hook.sh` exist; verify `comms.db` accessible via comms-link
+- Database verification: verify database accessible via comms-link (simple SELECT)
 
 **Full task state query:**
 
@@ -283,21 +280,24 @@ WHERE task_id NOT IN ('task-00', 'souffleur')
 
 ### Orphan Session Cleanup
 
-Kill orphaned sessions via `temp/musician-task-XX.pid` files only:
+Kill orphaned sessions via session layer and PID files:
 
 ```bash
-PID=$(cat temp/musician-task-XX.pid 2>/dev/null)
+source scripts/session-commands.sh
+# For each orphaned task session:
+destroy_session "musician-task-XX"  # or "musician-primary"
+PID=$(cat temp/window-musician-task-XX.pid 2>/dev/null)
 if [ -n "$PID" ] && kill -0 $PID 2>/dev/null; then
     kill $PID
-    rm temp/musician-task-XX.pid
 fi
+rm -f temp/window-musician-task-XX.pid
 ```
 
 If no PID file exists for a suspected orphan, let it survive for the user to close manually. Do not guess PIDs.
 
 ### Repetiteur Triage
 
-Check `temp/repetiteur.pid`:
+Check `temp/window-repetiteur.pid`:
 1. If file exists: check PID liveness (`kill -0`)
 2. If alive: kill it — the Repetiteur cannot continue without a Conductor to communicate with
 3. Remove PID file

@@ -1,5 +1,9 @@
 <skill name="conductor-example-launching-execution-sessions" version="4.0">
 
+<context>
+**Note (v5.0):** This example predates the universality update. It shows hardcoded kitty/remindly paths and inline prompt arguments — these are replaced by the session layer (references/session-layer.md), prompt files (temp/task-XX-prompt.txt), and configuration system. The workflow concepts remain valid; the specific commands should use the session layer from references/phase-execution.md.
+</context>
+
 <metadata>
 type: example
 parent-skill: conductor

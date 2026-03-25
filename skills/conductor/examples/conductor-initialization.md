@@ -1,5 +1,9 @@
 <skill name="conductor-example-initialization" version="4.0">
 
+<context>
+**Note (v5.0):** This example predates the universality update. It shows hardcoded kitty/remindly paths and hook verification — these are replaced by the session layer (references/session-layer.md) and configuration system (scripts/conductor-config.py). Hook verification is removed entirely. The workflow concepts remain valid; the specific commands should use the session layer and config values from references/initialization.md.
+</context>
+
 <metadata>
 type: example
 parent-skill: conductor

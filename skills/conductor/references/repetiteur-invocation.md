@@ -161,21 +161,31 @@ Prior completed phases do NOT get task-level breakdown — the Repetiteur works 
 <mandatory>
 ## Spawn Prompt Template
 
-The Repetiteur is spawned as an external Kitty session. The `/repetiteur` skill invocation carries the structured blocker report as its argument. No database row is created for the Repetiteur — its session ID is tracked in Conductor state only.
+The Repetiteur is spawned as an external session via the session layer. The `/repetiteur` skill invocation carries the structured blocker report as its argument. No database row is created for the Repetiteur — its session ID is tracked in Conductor state only.
 
 ### Launch Command
 
-<template follow="exact">
 ```bash
-kitty --directory /home/kyle/claude/remindly \
-  --title "Repetiteur" \
-  -- env -u CLAUDECODE claude \
-  --permission-mode acceptEdits "/repetiteur" &
-echo $! > temp/repetiteur.pid
-```
-</template>
+# Write repetiteur prompt to file (see Prompt Template below)
+cat > temp/repetiteur-prompt.txt << 'PROMPT'
+/repetiteur
+{structured blocker report content}
+PROMPT
 
-The PID is captured to `temp/repetiteur.pid` (singleton — only one Repetiteur session exists at a time).
+source scripts/session-commands.sh
+create_session "repetiteur" "$PROJECT_DIR"
+ATTACH_CMD=$(get_terminal_cmd "repetiteur")
+WINDOW_PID=$(TERMINAL_CMD=$TERMINAL_CMD scripts/launch-terminal.sh \
+    --title "Repetiteur" \
+    --dir "$PROJECT_DIR" \
+    --cmd "$ATTACH_CMD")
+echo "$WINDOW_PID" > temp/window-repetiteur.pid
+
+inject_session "repetiteur" \
+    "env -u CLAUDECODE claude --permission-mode acceptEdits -p \"\$(cat temp/repetiteur-prompt.txt)\""
+```
+
+The window PID is captured to `temp/window-repetiteur.pid` (singleton — only one Repetiteur session exists at a time).
 
 ### Prompt Template
 
@@ -348,11 +358,11 @@ After receiving the handoff, kill the Repetiteur session:
 
 <template follow="exact">
 ```bash
-PID=$(cat temp/repetiteur.pid 2>/dev/null)
+PID=$(cat temp/window-repetiteur.pid 2>/dev/null)
 if [ -n "$PID" ] && kill -0 $PID 2>/dev/null; then
     kill $PID
 fi
-rm -f temp/repetiteur.pid
+rm -f temp/window-repetiteur.pid
 ```
 </template>
 
@@ -392,11 +402,11 @@ ORDER BY id DESC LIMIT 1;
 
 <template follow="exact">
 ```bash
-PID=$(cat temp/repetiteur.pid 2>/dev/null)
+PID=$(cat temp/window-repetiteur.pid 2>/dev/null)
 if [ -n "$PID" ] && kill -0 $PID 2>/dev/null; then
     kill $PID
 fi
-rm -f temp/repetiteur.pid
+rm -f temp/window-repetiteur.pid
 ```
 </template>
 
@@ -507,7 +517,7 @@ Detect via PID check or extended silence in the conversation table (no new messa
 
 <template follow="exact">
 ```bash
-PID=$(cat temp/repetiteur.pid 2>/dev/null)
+PID=$(cat temp/window-repetiteur.pid 2>/dev/null)
 if [ -z "$PID" ] || ! kill -0 $PID 2>/dev/null; then
     # Repetiteur is dead
 fi

@@ -292,9 +292,12 @@ All external execution sessions MUST use the musician skill launch prompt templa
 <core>
 ### Launch Command
 
-<template follow="exact">
+**Step 1: Write prompt to file** (avoids shell escaping issues with inline prompts)
+
+<template follow="format">
 ```bash
-kitty --directory /home/kyle/claude/remindly --title "Musician: {task-id}" -- env -u CLAUDECODE claude --permission-mode acceptEdits "/musician
+cat > temp/{task-id}-prompt.txt << 'PROMPT'
+/musician
 
 Load the musician skill first, then proceed.
 
@@ -309,12 +312,50 @@ Read the returned message. It contains your complete task instructions for this 
 - Task ID: {task-id}
 - Phase: {PHASE_NUMBER} — {PHASE_NAME}
 
-Do not proceed without reading the full instruction message. All steps are there." &
-echo $! > temp/musician-{task-id}.pid
+Do not proceed without reading the full instruction message. All steps are there.
+PROMPT
 ```
 </template>
 
-The `&` runs the kitty process in the background. The `echo $!` captures the PID to a sentinel file for lifecycle management (see Musician Lifecycle Protocol via SKILL.md).
+**Step 2: Launch via session layer**
+
+For the long-term primary window (first task or sequential):
+<template follow="format">
+```bash
+source scripts/session-commands.sh
+create_session "musician-primary" "$PROJECT_DIR"
+if [[ ! -f temp/window-musician-primary.pid ]] || ! kill -0 "$(cat temp/window-musician-primary.pid)" 2>/dev/null; then
+    ATTACH_CMD=$(get_terminal_cmd "musician-primary")
+    WINDOW_PID=$(TERMINAL_CMD=$TERMINAL_CMD scripts/launch-terminal.sh \
+        --title "Musician: primary" \
+        --dir "$PROJECT_DIR" \
+        --cmd "$ATTACH_CMD")
+    echo "$WINDOW_PID" > temp/window-musician-primary.pid
+fi
+inject_session "musician-primary" \
+    "env -u CLAUDECODE claude --permission-mode $MUSICIAN_PERMISSIONS -p \"\$(cat temp/{task-id}-prompt.txt)\""
+```
+</template>
+
+For parallel temporary windows (tasks 2-N):
+<template follow="format">
+```bash
+source scripts/session-commands.sh
+create_session "musician-{task-id}" "$PROJECT_DIR"
+ATTACH_CMD=$(get_terminal_cmd "musician-{task-id}")
+WINDOW_PID=$(TERMINAL_CMD=$TERMINAL_CMD scripts/launch-terminal.sh \
+    --title "Musician: {task-id}" \
+    --dir "$PROJECT_DIR" \
+    --cmd "$ATTACH_CMD")
+echo "$WINDOW_PID" > temp/window-musician-{task-id}.pid
+inject_session "musician-{task-id}" \
+    "env -u CLAUDECODE claude --permission-mode $MUSICIAN_PERMISSIONS -p \"\$(cat temp/{task-id}-prompt.txt)\""
+```
+</template>
+
+<reference path="references/session-layer.md" load="on-demand">
+Session layer mechanics, backend-specific details, troubleshooting.
+</reference>
 
 ### Sequential Tasks
 
@@ -322,12 +363,14 @@ Launch one task at a time. Wait for the task to reach `complete` state before la
 
 ### Parallel Tasks
 
-Launch one kitty window per task. All tasks for the phase launch simultaneously. Use one Bash call per kitty window.
+Launch one session per task. Task 1 uses the long-term primary window; tasks 2-N get temporary windows.
+
+<mandatory>Check active session count before launching. If the phase has more tasks than MAX_PARALLEL_MUSICIANS, queue excess tasks and launch them as earlier tasks complete.</mandatory>
 
 ### Launch Sequence (Parallel)
 
 1. Launch verification watcher (see launch-verification section) — ensures monitoring is active before sessions start
-2. Launch kitty windows — one per task with PID capture
+2. Launch sessions — task 1 in primary window, tasks 2-N in temporary windows
 3. Launch Sentinel teammate (see sentinel-launch section)
 4. Verification watcher confirms all tasks reach `working` state within 5 minutes
 5. After verification: start the main monitoring subagent (see monitoring-subagent-template section)
@@ -368,29 +411,21 @@ INSERT INTO orchestration_messages (task_id, from_session, message, message_type
 
 **Step 3: Launch Musician Session**
 
-Launch single kitty window with PID capture:
+Write prompt to file and launch via session layer (primary window reuse):
 
-<template follow="exact">
 ```bash
-kitty --directory /home/kyle/claude/remindly --title "Musician: {task-id}" -- env -u CLAUDECODE claude --permission-mode acceptEdits "/musician
-
-Load the musician skill first, then proceed.
-
-**Your task:**
-
-Run this SQL query via comms-link:
-SELECT message FROM orchestration_messages WHERE task_id = '{task-id}' AND message_type = 'instruction';
-
-Read the returned message. It contains your complete task instructions for this phase. Follow every step, checkpoint, and requirement exactly as specified.
-
-**Context:**
-- Task ID: {task-id}
-- Phase: {PHASE_NUMBER} — {PHASE_NAME}
-
-Do not proceed without reading the full instruction message. All steps are there." &
-echo $! > temp/musician-{task-id}.pid
+# Write prompt to temp/{task-id}-prompt.txt (see musician-launch section for template)
+source scripts/session-commands.sh
+create_session "musician-primary" "$PROJECT_DIR"
+if [[ ! -f temp/window-musician-primary.pid ]] || ! kill -0 "$(cat temp/window-musician-primary.pid)" 2>/dev/null; then
+    ATTACH_CMD=$(get_terminal_cmd "musician-primary")
+    WINDOW_PID=$(TERMINAL_CMD=$TERMINAL_CMD scripts/launch-terminal.sh \
+        --title "Musician: primary" --dir "$PROJECT_DIR" --cmd "$ATTACH_CMD")
+    echo "$WINDOW_PID" > temp/window-musician-primary.pid
+fi
+inject_session "musician-primary" \
+    "env -u CLAUDECODE claude --permission-mode $MUSICIAN_PERMISSIONS -p \"\$(cat temp/{task-id}-prompt.txt)\""
 ```
-</template>
 
 **Step 4: Launch Background Monitoring Watcher**
 
@@ -407,7 +442,7 @@ Follow the monitoring cycle (monitoring-cycle section). Events route through eve
 
 **Step 6: Task Complete**
 
-Close kitty window (kill PID, remove PID file). If more sequential tasks remain in this phase, return to step 1 for the next task. If this was the last task, proceed to phase-completion section.
+Kill Claude in the primary session (`kill_claude_in_session "musician-primary"`). If more sequential tasks remain in this phase, return to step 1 for the next task. If this was the last task, proceed to phase-completion section.
 
 <mandatory>Wait for the task to reach `complete` state before launching the next sequential task. Sequential means sequential — no overlap.</mandatory>
 </core>
@@ -463,33 +498,13 @@ Danger files:
 
 **Step 5: Launch Verification Watcher**
 
-Before launching kitty windows, start a background verification watcher to confirm all sessions claim their tasks. This ensures monitoring is active before execution sessions start. See launch-verification section for the watcher prompt.
+Before launching sessions, start a background verification watcher to confirm all sessions claim their tasks. This ensures monitoring is active before execution sessions start. See launch-verification section for the watcher prompt.
 
-**Step 6: Launch Kitty Windows**
+**Step 6: Launch Sessions**
 
-Launch one kitty window per task via the Bash tool. Use parallel Bash calls so all sessions start simultaneously. Each launch captures PID:
+<mandatory>Check active session count before launching. If the phase has more tasks than MAX_PARALLEL_MUSICIANS, queue excess tasks and launch them as earlier tasks complete.</mandatory>
 
-<template follow="exact">
-```bash
-kitty --directory /home/kyle/claude/remindly --title "Musician: {task-id}" -- env -u CLAUDECODE claude --permission-mode acceptEdits "/musician
-
-Load the musician skill first, then proceed.
-
-**Your task:**
-
-Run this SQL query via comms-link:
-SELECT message FROM orchestration_messages WHERE task_id = '{task-id}' AND message_type = 'instruction';
-
-Read the returned message. It contains your complete task instructions for this phase. Follow every step, checkpoint, and requirement exactly as specified.
-
-**Context:**
-- Task ID: {task-id}
-- Phase: {PHASE_NUMBER} — {PHASE_NAME}
-
-Do not proceed without reading the full instruction message. All steps are there." &
-echo $! > temp/musician-{task-id}.pid
-```
-</template>
+Write prompts to files and launch via session layer. Task 1 uses the long-term primary window; tasks 2-N get temporary windows. See musician-launch section for the prompt template and launch commands.
 
 **Step 7: Launch Sentinel Teammate**
 

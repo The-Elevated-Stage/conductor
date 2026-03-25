@@ -28,7 +28,7 @@ protocol: Initialization Protocol
 - heartbeat-rule
 - conductor-heartbeat
 - memory-plan-tracking
-- hook-verification
+- heartbeat-teammate-launch
 - old-table-names
 </sections>
 
@@ -38,7 +38,17 @@ protocol: Initialization Protocol
 
 ## Bootstrap Sequence
 
-Execute these steps in order. Steps 1-5 are reads (parallelizable). Steps 6-8 are writes (sequential). Step 9 is verification. Step 10 is the user gate.
+Execute these steps in order. Step 0 is config resolution (always first). Steps 1-5 are reads (parallelizable). Steps 6-9 are writes (sequential). Step 10 is the user gate.
+
+### Step 0: Resolve Configuration
+
+Run the config resolver to load all orchestration settings:
+
+```bash
+python3 skills/conductor/scripts/conductor-config.py --project-dir "$(pwd)"
+```
+
+Store the JSON output in-session. All subsequent steps reference config values by name. If no `.orchestra_configs/conductor` file exists, all defaults apply silently.
 
 ### Step 1: Read Implementation Plan (Selective)
 
@@ -49,25 +59,32 @@ Read the Arranger-produced implementation plan selectively — NOT the full docu
 
 This gives the Conductor the map of the work without loading implementation detail. Phase sections are read on-demand when each phase begins (handled by Phase Execution Protocol).
 
-### Step 2: Git Branch
+### Step 2: VCS Check (Conditional)
 
-Verify not on main. Create feature branch if needed.
+**If `VCS_ENABLED` is true (default):** Verify not on main. Create feature branch if needed.
 
 ```bash
 bash scripts/check-git-branch.sh
 ```
 
-<mandatory>Never execute orchestration on the main branch.</mandatory>
+<mandatory>Never execute orchestration on the main branch when VCS is enabled.</mandatory>
+
+**If `VCS_ENABLED` is false:** Skip. Log to terminal: "VCS checks disabled via config — skipping branch verification."
 
 ### Step 3: Verify temp/ Directory
 
 Create `temp/` if missing.
 
-<mandatory>ALL temporary and scratch files created by the Conductor MUST go in temp/ during execution — never /tmp/ or any other location. temp/ is symlinked to /tmp/remindly and is automatically cleaned on system reboot.</mandatory>
+<mandatory>ALL temporary and scratch files created by the Conductor MUST go in temp/ during execution — never /tmp/ or any other location.</mandatory>
 
-### Step 4: Load docs/ READMEs
+### Step 4: Load Project Context
 
-Full reads of: `docs/README.md`, `knowledge-base/README.md`, `implementation/README.md`, `implementation/proposals/README.md`, `scratchpad/README.md`. Skip all other READMEs (read on demand).
+Discover and read project documentation indexes:
+1. Check for `docs/README.md` — read if present
+2. Scan for other top-level READMEs in the project root — read if present
+3. Skip gracefully if no documentation indexes exist
+
+No hardcoded list — different projects have different structures. The goal is to gain enough project context for informed orchestration.
 
 ### Step 5: Load Memory Graph
 
@@ -79,15 +96,15 @@ Drop and recreate tables via comms-link execute. Insert conductor row and Souffl
 
 ### Step 7: Launch Souffleur
 
-Discover own kitty PID, then launch the Souffleur supervisor. See souffleur-launch section for the full launch sequence and hard gate.
+Discover own terminal PID, then launch the Souffleur supervisor. See souffleur-launch section for the full launch sequence and hard gate.
 
 ### Step 8: Launch Message Watcher
 
-After the Souffleur is confirmed, launch the background message watcher before hook verification or user approval. See message-watcher-launch section for details.
+After the Souffleur is confirmed, launch the background message watcher before user approval. See message-watcher-launch section for details.
 
-### Step 9: Verify Hooks
+### Step 9: Launch Heartbeat Teammate
 
-Hooks are self-configuring via `hooks.json` and SessionStart hook. See hook-verification section for details.
+After the message watcher, launch the permanent heartbeat teammate. See heartbeat-teammate-launch section for details.
 
 ### Step 10: User Approval Gate
 
@@ -253,23 +270,33 @@ CREATE INDEX idx_tasks_state_heartbeat ON orchestration_tasks(state, last_heartb
 <core>
 ## Step 7: Launch Souffleur
 
-### Discover Own Kitty PID
+### Discover Own Terminal PID
 
-Walk the process tree to find the kitty PID that owns this session. This PID is passed to the Souffleur so it can monitor the Conductor's terminal window.
-
-See RAG: "kitty PID discovery" for the discovery method.
+Walk the process tree to find the terminal window PID that owns this session. This PID is passed to the Souffleur so it can monitor the Conductor's terminal window. Use the `$PPID` walk to traverse the process tree upward until a terminal process is found.
 
 ### Launch Souffleur
 
 ```bash
-kitty --directory /home/kyle/claude/remindly \
-  --title "Souffleur" \
-  -- env -u CLAUDECODE claude \
-  --permission-mode acceptEdits \
-  "/souffleur PID:$KITTY_PID SESSION_ID:$CLAUDE_SESSION_ID" &
+# Write Souffleur prompt to file (avoids shell escaping issues)
+cat > temp/souffleur-prompt.txt << PROMPT
+/souffleur PID:$TERMINAL_PID SESSION_ID:$CLAUDE_SESSION_ID
+PROMPT
+
+# Launch via session layer
+source scripts/session-commands.sh
+create_session "souffleur" "$PROJECT_DIR"
+ATTACH_CMD=$(get_terminal_cmd "souffleur")
+WINDOW_PID=$(TERMINAL_CMD=$TERMINAL_CMD scripts/launch-terminal.sh \
+    --title "Souffleur" \
+    --dir "$PROJECT_DIR" \
+    --cmd "$ATTACH_CMD")
+echo "$WINDOW_PID" > temp/window-souffleur.pid
+
+inject_session "souffleur" \
+    "env -u CLAUDECODE claude --permission-mode $SOUFFLEUR_PERMISSIONS -p \"\$(cat temp/souffleur-prompt.txt)\""
 ```
 
-`$CLAUDE_SESSION_ID` is a system prompt value injected by the SessionStart hook — it is NOT a bash environment variable. The Conductor references it from its own context when constructing the launch command.
+`$CLAUDE_SESSION_ID` is available in the system prompt — it is NOT a bash environment variable. The Conductor references it from its own context when constructing the launch command.
 
 ### Hard Gate: Souffleur Confirmation
 
@@ -332,7 +359,7 @@ If columns are missing or tables don't exist: drop and recreate using the DDL ab
 | `task_id` | TEXT PK | `task-00` (conductor), `task-01`+ (execution), `fallback-{session_id}` (guard block exits), `task-XX-fix` (post-completion corrections) |
 | `state` | TEXT NOT NULL | State machine value (13 valid states via CHECK) |
 | `instruction_path` | TEXT | Path to task instruction file in `docs/tasks/` |
-| `session_id` | TEXT | Actual Claude Code session ID (set by SessionStart hook, injected into system prompt as $CLAUDE_SESSION_ID) |
+| `session_id` | TEXT | Actual Claude Code session ID (available in system prompt as $CLAUDE_SESSION_ID) |
 | `worked_by` | TEXT | Worker identifier with succession: `musician-task-{NN}`, `musician-task-{NN}-S2`, etc. |
 | `started_at` | TEXT | When task was claimed |
 | `completed_at` | TEXT | When task completed |
@@ -358,7 +385,7 @@ If columns are missing or tables don't exist: drop and recreate using the DDL ab
 <core>
 ## Database Location
 
-`/home/kyle/claude/remindly/comms.db` — shared by comms-link MCP server and stop hook (via sqlite3).
+Database is accessed exclusively via comms-link MCP. The Conductor does not need to know the database file path — comms-link abstracts the location.
 
 <mandatory>All database operations MUST use comms-link MCP (query for SELECT, execute for writes). Direct sqlite3 CLI access creates WAL isolation issues — comms-link cannot see changes made by sqlite3 and vice versa.</mandatory>
 </core>
@@ -524,21 +551,36 @@ This line is:
 </core>
 </section>
 
-<section id="hook-verification">
-<core>
-## Hook Verification
+<section id="heartbeat-teammate-launch">
+<mandatory>
+## Step 9: Launch Heartbeat Teammate
 
-Hooks are self-configuring via `hooks.json` and the SessionStart hook. Verify:
+After the message watcher is launched, create a permanent heartbeat teammate. This teammate monitors the Conductor's own heartbeat and sends CRITICAL interrupts via SendMessage if the heartbeat goes stale.
 
-1. `hooks.json` exists in `tools/implementation-hook/`
-2. `session-start-hook.sh` exists in `tools/implementation-hook/`
-3. `stop-hook.sh` exists in `tools/implementation-hook/`
-4. `comms.db` is accessible via comms-link (run a simple SELECT to confirm)
+**Launch as a Team teammate** (not a regular subagent) with `model="opus"`:
 
-The SessionStart hook injects `CLAUDE_SESSION_ID={session_id}` into the system prompt via `additionalContext`. This is how the Conductor and Musicians identify themselves in the database.
+Prompt:
+```
+You are the Conductor's heartbeat watchdog. Your ONLY job is to monitor the Conductor's heartbeat and alert when it goes stale.
 
-The Stop hook queries `orchestration_tasks` by session_id and only allows session exit when the task state is terminal (`complete`, `exited`, `exit_requested` for conductor, or `context_recovery` for conductor).
-</core>
+**Behavior:**
+1. Poll task-00 heartbeat via comms-link every 60 seconds:
+   SELECT last_heartbeat, (julianday('now') - julianday(last_heartbeat)) * 86400 AS seconds_stale
+   FROM orchestration_tasks WHERE task_id = 'task-00';
+2. If seconds_stale > {HEARTBEAT_POKE_THRESHOLD}: SendMessage to Conductor immediately
+3. Message: "HEARTBEAT STALE: task-00 heartbeat is {N} seconds old. Message-watcher may be dead. Relaunch immediately."
+4. If heartbeat is still stale after 2 more poll cycles: poke again with escalated urgency
+5. Check for shutdown signal each cycle:
+   SELECT id FROM orchestration_messages
+   WHERE task_id = 'task-00' AND message = 'heartbeat_teammate_shutdown' AND message_type = 'system'
+   ORDER BY id DESC LIMIT 1;
+   If found: exit cleanly.
+
+**CRITICAL: You are a SILENT watchdog. Send messages ONLY when the heartbeat is stale. Never send status updates, confirmations, or progress reports. Every message you send triggers a critical interrupt in the Conductor. Do not send unnecessary messages.**
+```
+
+The heartbeat teammate runs for the entire Conductor session. Shutdown: Conductor inserts `heartbeat_teammate_shutdown` message during Completion Protocol.
+</mandatory>
 </section>
 
 <section id="old-table-names">

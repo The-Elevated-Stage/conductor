@@ -37,7 +37,7 @@ When all tasks in all phases reach terminal state (`complete` or `exited`), exec
 6. Clean up the decisions directory
 7. Prepare PR (review commits, check for sensitive data)
 8. Report to user with deliverables and recommendations
-9. Close all remaining Musician kitty windows — return to SKILL.md and locate the Musician Lifecycle Protocol for cleanup
+9. Shutdown heartbeat teammate and close all remaining Musician sessions — return to SKILL.md and locate the Musician Lifecycle Protocol for cleanup
 10. Set conductor state to `complete`
 
 <mandatory>Step 8 is the one point where the Conductor pauses for user input. The orchestration is complete — the user decides whether to merge, create PR, or adjust. All prior steps are autonomous.</mandatory>
@@ -221,16 +221,46 @@ Implementation complete.
 
 <section id="close-musician-windows">
 <core>
-## Step 9: Close Musician Windows
+## Step 9: Shutdown Heartbeat Teammate and Close Musician Sessions
 
-Close all remaining Musician kitty windows. For each task, read the PID file and terminate:
+### Shutdown Heartbeat Teammate
 
-```bash
-kill $(cat temp/musician-{task-id}.pid) 2>/dev/null
-rm -f temp/musician-{task-id}.pid
+Insert the shutdown signal for the heartbeat teammate:
+
+```sql
+INSERT INTO orchestration_messages (task_id, from_session, message, message_type) VALUES (
+    'task-00', 'task-00',
+    'heartbeat_teammate_shutdown',
+    'system'
+);
 ```
 
-Return to SKILL.md and locate the Musician Lifecycle Protocol for the full cleanup mechanics if any windows require special handling (crash recovery, stale PIDs).
+The heartbeat teammate detects this message on its next poll cycle and exits cleanly.
+
+### Close Musician Sessions
+
+Close all remaining Musician sessions and windows via the session layer:
+
+```bash
+source scripts/session-commands.sh
+# Destroy the long-term primary window
+destroy_session "musician-primary"
+PID=$(cat temp/window-musician-primary.pid 2>/dev/null)
+[[ -n "$PID" ]] && kill "$PID" 2>/dev/null || true
+rm -f temp/window-musician-primary.pid
+
+# Destroy any remaining parallel windows
+for pidfile in temp/window-musician-task-*.pid; do
+    [ -f "$pidfile" ] || continue
+    task_name=$(basename "$pidfile" .pid | sed 's/^window-//')
+    destroy_session "$task_name"
+    PID=$(cat "$pidfile" 2>/dev/null)
+    [[ -n "$PID" ]] && kill "$PID" 2>/dev/null || true
+    rm -f "$pidfile"
+done
+```
+
+Return to SKILL.md and locate the Musician Lifecycle Protocol for the full cleanup mechanics if any sessions require special handling (crash recovery, stale PIDs).
 </core>
 </section>
 
@@ -250,7 +280,7 @@ WHERE task_id = 'task-00';
 ```
 </template>
 
-The stop hook detects `complete` state and allows the Conductor session to exit normally.
+The `complete` state allows the Conductor session to exit normally.
 </core>
 </section>
 

@@ -32,24 +32,36 @@ protocol: Musician Lifecycle Protocol
 
 ## PID Tracking
 
-Every Musician kitty window launch captures its process ID for lifecycle management.
+Sessions are managed via the session layer (`scripts/session-commands.sh`). PID tracking uses the following files:
 
-**On launch:**
-<template follow="exact">
+**Window PIDs** (terminal process — managed via session layer):
+- `temp/window-musician-primary.pid` — long-term primary window
+- `temp/window-musician-task-XX.pid` — temporary parallel windows
+
+**Session identifiers** (tmux name or FIFO path):
+- `temp/session-musician-primary.name`
+- `temp/session-musician-task-XX.name`
+
+**Claude PIDs:** Discovered dynamically via `kill_claude_in_session` from `scripts/session-commands.sh`. Not stored in files.
+
+**On cleanup (kill Claude, preserve window):**
 ```bash
-kitty --directory /home/kyle/claude/remindly --title "Musician: task-XX" -- env -u CLAUDECODE claude --permission-mode acceptEdits "prompt" &
-echo $! > temp/musician-task-XX.pid
+source scripts/session-commands.sh
+kill_claude_in_session "musician-primary"
 ```
-</template>
 
-**On cleanup:**
+**On full session destroy:**
 ```bash
-PID=$(cat temp/musician-task-XX.pid)
-kill $PID  # SIGTERM for clean termination
-rm temp/musician-task-XX.pid
+source scripts/session-commands.sh
+destroy_session "musician-primary"
+PID=$(cat temp/window-musician-primary.pid 2>/dev/null)
+[[ -n "$PID" ]] && kill "$PID" 2>/dev/null || true
+rm -f temp/window-musician-primary.pid
 ```
 
-The PID file is the Conductor's handle for managing that specific session. Without it, the Conductor cannot target a specific window for cleanup.
+<reference path="references/session-layer.md" load="on-demand">
+Session layer mechanics, backend-specific details, PID discovery patterns.
+</reference>
 </core>
 </section>
 
@@ -59,11 +71,11 @@ The PID file is the Conductor's handle for managing that specific session. Witho
 
 Three rules govern when Musician kitty windows are closed:
 
-1. **Parallel tasks:** Close all windows when ALL parallel siblings reach `complete`/`exited`. Do not close one-by-one as they finish — wait for the full set.
+1. **Parallel tasks:** Destroy all temporary windows/sessions when ALL parallel siblings reach `complete`/`exited`. The primary window's Claude process is killed but the window stays. Do not close one-by-one as they finish — wait for the full set.
 
-2. **Sequential tasks:** Close immediately when the task reaches `complete`/`exited`. No waiting.
+2. **Sequential tasks:** Kill Claude in the primary window immediately (`kill_claude_in_session`). The window stays for the next task.
 
-3. **Re-launch (handoff):** Close old session IMMEDIATELY before launching the replacement. Never have two kitty windows for the same task simultaneously. Kill PID first, then launch new window.
+3. **Re-launch (handoff):** Kill Claude in the session, then inject replacement command. Never have two Claude processes in the same session simultaneously.
 </mandatory>
 </section>
 
@@ -250,26 +262,20 @@ INSERT INTO orchestration_messages (task_id, from_session, message, message_type
 SELECT session_id FROM orchestration_tasks WHERE task_id = '{original-task-id}';
 ```
 
-3. Launch resumed session:
-<template follow="exact">
+3. Write fix prompt to `temp/{original-task-id}-fix-prompt.txt` with the fix instructions, then launch resumed session via session layer:
+
 ```bash
-kitty --directory /home/kyle/claude/remindly --title "Musician: {original-task-id}-fix" -- env -u CLAUDECODE claude --resume "{SESSION_ID}" "/musician
-
-Load the musician skill first, then proceed.
-
-**Your task:**
-
-Run this SQL query via comms-link:
-SELECT message FROM orchestration_messages WHERE task_id = '{original-task-id}-fix' AND message_type = 'instruction';
-
-Read the returned message. It contains your fix instructions.
-
-You are being resumed to correct an integration error discovered by a later task.
-Your original context is intact — you already know what you built.
-Claim the fix task row, apply the correction, verify, and report." &
-echo $! > temp/musician-{original-task-id}-fix.pid
+source scripts/session-commands.sh
+create_session "musician-{original-task-id}-fix" "$PROJECT_DIR"
+ATTACH_CMD=$(get_terminal_cmd "musician-{original-task-id}-fix")
+WINDOW_PID=$(TERMINAL_CMD=$TERMINAL_CMD scripts/launch-terminal.sh \
+    --title "Musician: {original-task-id}-fix" \
+    --dir "$PROJECT_DIR" \
+    --cmd "$ATTACH_CMD")
+echo "$WINDOW_PID" > temp/window-musician-{original-task-id}-fix.pid
+inject_session "musician-{original-task-id}-fix" \
+    "env -u CLAUDECODE claude --resume \"$SESSION_ID\" --permission-mode $MUSICIAN_PERMISSIONS -p \"\$(cat temp/{original-task-id}-fix-prompt.txt)\""
 ```
-</template>
 
 The resumed session claims the fix task row via comms-link and follows the normal orchestration flow (watcher, heartbeat, review). If it exhausts context during the fix, it exits cleanly with a HANDOFF — the fix task row keeps it covered.
 </core>
@@ -362,13 +368,12 @@ DELETE FROM orchestration_tasks WHERE task_id = 'fallback-{session-id}';
 
 When launching a replacement Musician after any handoff type:
 
-<mandatory>Close the old kitty window BEFORE launching the replacement. Kill PID, remove PID file, THEN launch.</mandatory>
+<mandatory>Kill Claude in the old session BEFORE injecting the replacement command.</mandatory>
 
-**Step 1: Close old session**
+**Step 1: Kill Claude in old session**
 ```bash
-PID=$(cat temp/musician-task-XX.pid)
-kill $PID
-rm temp/musician-task-XX.pid
+source scripts/session-commands.sh
+kill_claude_in_session "musician-primary"  # or "musician-task-XX" for parallel
 ```
 
 **Step 2: Output progress to terminal**
@@ -381,33 +386,25 @@ Last completed step: {description}
 Launching replacement session...
 ```
 
-**Step 3: Launch replacement**
+**Step 3: Write replacement prompt and inject**
 
-<template follow="exact">
+Write the replacement prompt to `temp/task-XX-prompt.txt` (include HANDOFF reference, previous session info, `worked_by-SN` succession). Then inject:
+
 ```bash
-kitty --directory /home/kyle/claude/remindly --title "Musician: task-XX (S{N})" -- env -u CLAUDECODE claude --permission-mode acceptEdits "/musician
-
-Load the musician skill first, then proceed.
-
-**Your task:**
-
-Run this SQL query via comms-link:
-SELECT message FROM orchestration_messages WHERE task_id = 'task-XX' AND message_type = 'instruction';
-
-Read the returned message. It contains your complete task instructions for this phase. Follow every step, checkpoint, and requirement exactly as specified.
-
-Previous session: {worked_by}
-New session will be: {worked_by-SN}
-Read HANDOFF from temp/ for context.
-
-**Context:**
-- Task ID: task-XX
-- Phase: {N} — {PHASE_NAME}
-
-Do not proceed without reading the full instruction message. All steps are there." &
-echo $! > temp/musician-task-XX.pid
+inject_session "musician-primary" \
+    "env -u CLAUDECODE claude --permission-mode $MUSICIAN_PERMISSIONS -p \"\$(cat temp/task-XX-prompt.txt)\""
 ```
-</template>
+
+For parallel temporary sessions that need full replacement (window destroyed), create a new session and window instead:
+```bash
+create_session "musician-task-XX" "$PROJECT_DIR"
+ATTACH_CMD=$(get_terminal_cmd "musician-task-XX")
+WINDOW_PID=$(TERMINAL_CMD=$TERMINAL_CMD scripts/launch-terminal.sh \
+    --title "Musician: task-XX (S{N})" --dir "$PROJECT_DIR" --cmd "$ATTACH_CMD")
+echo "$WINDOW_PID" > temp/window-musician-task-XX.pid
+inject_session "musician-task-XX" \
+    "env -u CLAUDECODE claude --permission-mode $MUSICIAN_PERMISSIONS -p \"\$(cat temp/task-XX-prompt.txt)\""
+```
 
 After launching the replacement session, proceed to SKILL.md → Message-Watcher Exit Protocol to ensure the watcher is running for the new session.
 </core>

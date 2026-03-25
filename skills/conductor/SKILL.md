@@ -3,7 +3,7 @@ name: Conductor
 description: Coordinates autonomous execution of multi-task implementation plans. Always invoke manually via /conductor.
 ---
 
-<skill name="conductor" version="4.0">
+<skill name="conductor" version="5.0">
 
 <metadata>
 type: skill

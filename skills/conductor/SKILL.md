@@ -24,6 +24,7 @@ tier: 3
 - compact-protocol
 - recovery-bootstrap-protocol
 - sentinel-monitoring-protocol
+- infrastructure-degradation-protocol
 - completion-protocol
 </sections>
 
@@ -42,6 +43,8 @@ tier: 3
 - Items with mandatory authority tags in the implementation plan's phase sections are NOT modifiable by the Conductor, even within intra-phase authority
 - Current plan path in MEMORY.md is the source of truth — if any referenced plan does not match, stop and investigate
 - Every state transition in the database MUST include last_heartbeat = datetime('now') — omitting the heartbeat is a bug
+- Configuration resolver MUST run as Step 0 before all other initialization steps — resolved values are used by every subsequent protocol
+- Messages from the heartbeat teammate are CRITICAL interrupts — drop current work immediately and address the heartbeat issue before returning to the interrupted task. A stale heartbeat means the Conductor is invisible to Musicians and approaching Souffleur kill threshold.
 </mandatory>
 </section>
 
@@ -69,7 +72,7 @@ The Conductor coordinates work across three tiers. Understanding this model is e
 
 **Tier 1 — External sessions (Musicians):** Full Claude Code sessions launched in separate kitty windows via the Bash tool. Each has its own independent context. Executes task instructions autonomously, coordinating via the comms-link database. Conductor launches these directly — they are NOT subagents.
 
-**Tier 2 — Subagents and Teammates:** Spawned by the Conductor or by Musicians using the Task tool. Share context pressure with their parent session. Used for task instruction creation (Copyist teammate), monitoring (watcher subagent), investigation (Explorer teammate), and focused work.
+**Tier 2 — Subagents and Teammates:** Spawned by the Conductor or by Musicians using the Task tool. Share context pressure with their parent session. Used for task instruction creation (Copyist teammate), monitoring (watcher subagent), heartbeat monitoring (heartbeat teammate), investigation (Explorer teammate), and focused work.
 
 ### Context Headroom Strategy
 
@@ -110,6 +113,7 @@ These are the exact protocol names used throughout this skill and its reference 
 | **Compact Protocol** | Compacting external child sessions |
 | **Recovery Bootstrap Protocol** | Unified Conductor recovery after crash or context exhaustion |
 | **Sentinel Monitoring Protocol** | Early warning system |
+| **Infrastructure Degradation Protocol** | Self-healing and escalation for Conductor tool failures |
 | **Completion Protocol** | Final integration and handoff |
 </core>
 
@@ -138,7 +142,7 @@ Plan path is tracked in MEMORY.md. This single line is the Conductor's persisten
 </context>
 
 <reference path="references/initialization.md" load="required">
-Complete bootstrap sequence: database DDL, plan loading, plan-index verification, git branch setup, MEMORY.md tracking, hook verification, environment checks.
+Complete bootstrap sequence: configuration resolution, database DDL, plan loading, plan-index verification, VCS check (conditional), MEMORY.md tracking, environment checks.
 </reference>
 
 <guidance>See `examples/conductor-initialization.md` for an illustrative initialization walkthrough.</guidance>
@@ -321,6 +325,24 @@ The Sentinel is purely additive. It runs alongside the background message-watche
 
 <reference path="references/sentinel-monitoring.md" load="required">
 Sentinel teammate prompt template, polling logic, anomaly detection criteria, lifecycle management, launch and shutdown procedures.
+</reference>
+</section>
+
+<section id="infrastructure-degradation-protocol">
+<core>
+## Infrastructure Degradation Protocol
+
+When the Conductor's own tools degrade during a long-running session — bash failures, MCP timeouts, comms-link unresponsiveness — this protocol provides a structured escalation from self-healing through Souffleur relaunch to critical failure. This is not about Musician errors (handled by Error Recovery Protocol) — it is about the Conductor's own infrastructure becoming unreliable.
+
+Detection is heuristic: the same tool failing 3+ times in a row, multiple unrelated tools failing in a short window, or comms-link becoming unresponsive. When the Conductor recognizes a pattern of tool degradation, it enters this protocol.
+
+The reference file defines a four-step escalation ladder. Step 1 (self-heal) is the most critical — the Conductor should exhaust available workarounds before escalating, because a Souffleur relaunch pauses the entire orchestration.
+
+<mandatory>The self-heal step (Step 1) should attempt at least DEGRADATION_FIX_ATTEMPTS (default 5) different approaches before escalating. This is a minimum recommendation — more attempts are better. Escalate sooner only if self-healing is provably impossible (e.g., comms-link entirely unreachable).</mandatory>
+</core>
+
+<reference path="references/infrastructure-degradation.md" load="required">
+Complete escalation ladder: self-heal strategies, Souffleur relaunch sequence (with critical ordering), post-relaunch fallback, critical failure procedure.
 </reference>
 </section>
 

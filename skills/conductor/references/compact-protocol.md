@@ -72,14 +72,27 @@ Retrieve the child session's ID (NOT the Conductor's own `$CLAUDE_SESSION_ID`):
 SELECT session_id FROM orchestration_tasks WHERE task_id = '{task-id}';
 ```
 
-Count JSONL lines BEFORE launching compact:
+Discover the JSONL path dynamically and count lines BEFORE launching compact:
 
 ```bash
-SENTINEL=~/.claude/projects/-home-kyle-claude-remindly/${SESSION_ID}.jsonl
+SENTINEL=$(ls ~/.claude/projects/*/${SESSION_ID}.jsonl 2>/dev/null | head -1)
+if [[ -z "$SENTINEL" ]]; then
+    # Retry with short delay (JSONL may not be created yet)
+    for i in $(seq 1 6); do
+        sleep 5
+        SENTINEL=$(ls ~/.claude/projects/*/${SESSION_ID}.jsonl 2>/dev/null | head -1)
+        [[ -n "$SENTINEL" ]] && break
+    done
+fi
+if [[ -z "$SENTINEL" ]]; then
+    # Compact failure — fall back to fresh-session launch
+    echo "JSONL not found for session $SESSION_ID — compact cannot proceed"
+    # Route to failure-handling section
+fi
 BASELINE_LINES=$(wc -l < "$SENTINEL")
 ```
 
-The watcher reads all lines from baseline forward, preventing race conditions.
+Cache the resolved SENTINEL path for reuse within the same compact cycle. The watcher reads all lines from baseline forward, preventing race conditions.
 
 ### Step 3: Launch Compact Watcher (Background Subagent)
 
@@ -115,11 +128,16 @@ See RAG: `compact-detection-jsonl-signals.md` for JSONL signal details and detec
 <mandatory>Watcher launches BEFORE compact session — this prevents race conditions where the compact completes before the watcher begins monitoring.</mandatory>
 
 ```bash
-kitty --directory /home/kyle/claude/remindly \
-  --title "Compact: task-XX" \
-  -- env -u CLAUDECODE claude \
-  --resume $SESSION_ID "/compact" &
-echo $! > temp/musician-task-XX.pid
+source scripts/session-commands.sh
+create_session "compact-task-XX" "$PROJECT_DIR"
+ATTACH_CMD=$(get_terminal_cmd "compact-task-XX")
+WINDOW_PID=$(TERMINAL_CMD=$TERMINAL_CMD scripts/launch-terminal.sh \
+    --title "Compact: task-XX" \
+    --dir "$PROJECT_DIR" \
+    --cmd "$ATTACH_CMD")
+echo "$WINDOW_PID" > temp/window-compact-task-XX.pid
+inject_session "compact-task-XX" \
+    "env -u CLAUDECODE claude --resume $SESSION_ID /compact"
 ```
 
 > `/compact` is a built-in Claude Code command that triggers context compaction within the session. It is not a skill invocation.
@@ -129,12 +147,14 @@ echo $! > temp/musician-task-XX.pid
 *Success path (compact_complete message detected):*
 
 ```bash
-PID=$(cat temp/musician-task-XX.pid)
-kill -0 $PID 2>/dev/null && kill $PID
-rm temp/musician-task-XX.pid
+source scripts/session-commands.sh
+destroy_session "compact-task-XX"
+PID=$(cat temp/window-compact-task-XX.pid 2>/dev/null)
+[[ -n "$PID" ]] && kill "$PID" 2>/dev/null || true
+rm -f temp/window-compact-task-XX.pid
 ```
 
-> The Step 4 session never auto-closes — after `/compact` finishes, the session sits idle waiting for input. PID reuse is not a realistic risk, but the defensive `kill -0` check is responsible practice and maintains consistency with patterns in `error-recovery.md`.
+> The Step 4 session never auto-closes — after `/compact` finishes, the session sits idle waiting for input.
 
 For failure path details, see failure-handling section.
 
@@ -144,35 +164,14 @@ Uses the existing replacement-session-launch template from `musician-lifecycle.m
 
 `worked_by` increments on compact resume to track compaction boundaries. Each compaction is a new generation even though the session ID is preserved via `--resume`.
 
-<template follow="exact">
+Write the continuation prompt to `temp/task-XX-prompt.txt` (include previous session, worked_by-SN, HANDOFF reference). Then launch via session layer:
+
 ```bash
-kitty --directory /home/kyle/claude/remindly \
-  --title "Musician: task-XX (S{N})" \
-  -- env -u CLAUDECODE claude \
-  --resume $SESSION_ID \
-  --permission-mode acceptEdits "/musician
-
-Load the musician skill first, then proceed.
-
-**Your task:**
-
-Run this SQL query via comms-link:
-SELECT message FROM orchestration_messages WHERE task_id = 'task-XX' AND message_type = 'instruction';
-
-Read the returned message. It contains your complete task instructions for this phase. Follow every step, checkpoint, and requirement exactly as specified.
-
-Previous session: {worked_by}
-New session will be: {worked_by-SN}
-Read HANDOFF from temp/ for context.
-
-**Context:**
-- Task ID: task-XX
-- Phase: {N} — {PHASE_NAME}
-
-Do not proceed without reading the full instruction message. All steps are there." &
-echo $! > temp/musician-task-XX.pid
+source scripts/session-commands.sh
+# Reuse primary window for sequential, or create new for parallel
+inject_session "musician-primary" \
+    "env -u CLAUDECODE claude --resume $SESSION_ID --permission-mode $MUSICIAN_PERMISSIONS -p \"\$(cat temp/task-XX-prompt.txt)\""
 ```
-</template>
 
 `--resume` preserves the same session ID. The guard clause's `session_id` assignment is a no-op on resumed sessions — the WHERE clause still matches (`state IN ('watching', 'fix_proposed', 'exit_requested')`), so the claim succeeds. `worked_by` increments to track the compaction boundary.
 
@@ -218,7 +217,7 @@ The compact watcher reaches its 5-minute timeout without detecting the `compact_
 ### Step 2: Check Compact Session PID
 
 ```bash
-PID=$(cat temp/musician-task-XX.pid 2>/dev/null)
+PID=$(cat temp/window-compact-task-XX.pid 2>/dev/null)
 if [ -n "$PID" ] && kill -0 $PID 2>/dev/null; then
     echo "Compact session alive — compact hung"
 else
@@ -229,8 +228,11 @@ fi
 ### Step 3: If Alive — Kill It (Compact Hung)
 
 ```bash
-kill $PID
-rm temp/musician-task-XX.pid
+source scripts/session-commands.sh
+destroy_session "compact-task-XX"
+PID=$(cat temp/window-compact-task-XX.pid 2>/dev/null)
+[[ -n "$PID" ]] && kill "$PID" 2>/dev/null || true
+rm -f temp/window-compact-task-XX.pid
 ```
 
 The compact session is still running but did not produce a completion signal within 5 minutes. It is hung — kill it.
@@ -240,7 +242,7 @@ The compact session is still running but did not produce a completion signal wit
 Scan JSONL from baseline forward one final time. The signal may have been written just before the timeout check.
 
 ```bash
-SENTINEL=~/.claude/projects/-home-kyle-claude-remindly/${SESSION_ID}.jsonl
+# Use the cached SENTINEL path from Step 2
 # Read lines from BASELINE_LINES forward, check for compact_boundary
 ```
 

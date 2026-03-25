@@ -49,6 +49,8 @@ This protocol has multiple entry points depending on how the Conductor arrives. 
 | Multiple events pending simultaneously | error-prioritization |
 
 Each section handles its scenario and routes to the next appropriate action. When crossing protocol boundaries, return to SKILL.md to locate the named protocol.
+
+**Tool-level failures (Conductor's own infrastructure):** If the Conductor itself encounters repeated tool failures (bash, MCP, comms-link), this is NOT a Musician error. Route to the Infrastructure Degradation Protocol via SKILL.md — do not attempt to handle Conductor tool degradation through this protocol's Musician-focused recovery flows.
 </core>
 </section>
 

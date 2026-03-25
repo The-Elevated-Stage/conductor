@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # validate-coordination.sh — Check database state and report task statuses
-# Usage: bash ~/.claude/skills/conductor/scripts/validate-coordination.sh [db_path]
+# Usage: bash scripts/validate-coordination.sh [db_path]
+#
+# NOTE: This script uses sqlite3 directly as a diagnostic fallback.
+# For production orchestration, always use comms-link MCP.
+# Direct sqlite3 may not see recent comms-link writes (WAL isolation).
 
-DB="${1:-/home/kyle/claude/remindly/comms.db}"
+DB="${1:-comms.db}"
 
 if [ ! -f "$DB" ]; then
     echo "ERROR: Database not found at $DB"

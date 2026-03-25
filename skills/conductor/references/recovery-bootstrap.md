@@ -297,7 +297,7 @@ If no PID file exists for a suspected orphan, let it survive for the user to clo
 
 ### Repetiteur Triage
 
-Check `temp/repetiteur.pid`:
+Check `temp/window-repetiteur.pid`:
 1. If file exists: check PID liveness (`kill -0`)
 2. If alive: kill it — the Repetiteur cannot continue without a Conductor to communicate with
 3. Remove PID file

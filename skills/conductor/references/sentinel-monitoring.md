@@ -159,7 +159,7 @@ The Sentinel reads temp/ files whose format is defined by the Musician skill. Th
 
 **Files the Sentinel ignores:**
 - `temp/task-{NN}-HANDOFF` — written only on clean exit, not during active execution
-- `temp/musician-task-{NN}.pid` — PID tracking file, managed by the Conductor
+- `temp/window-musician-*.pid` — Window PID tracking files, managed by the Conductor via session layer
 
 The anomaly criteria depend on specific patterns in these files:
 - `self-correction` keyword in status entries

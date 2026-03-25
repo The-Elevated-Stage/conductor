@@ -155,11 +155,12 @@ When a Musician's heartbeat goes stale (>9 minutes without update):
 ### Step 1: Check PID status
 
 ```bash
-PID=$(cat temp/musician-task-XX.pid 2>/dev/null)
+# Check if the terminal window is still alive
+PID=$(cat temp/window-musician-primary.pid 2>/dev/null)  # or window-musician-task-XX.pid for parallel
 if [ -n "$PID" ] && kill -0 $PID 2>/dev/null; then
-    echo "PID alive but heartbeat stale — watcher died, session stuck"
+    echo "Window alive but heartbeat stale — watcher died, session stuck"
 else
-    echo "PID dead — session crashed"
+    echo "Window dead — session crashed"
 fi
 ```
 
@@ -189,7 +190,7 @@ When a `claim_blocked` message is detected (a Musician failed to claim its assig
 
 ### Autonomous Recovery Flow
 
-1. Close the failed Musician's kitty window (read PID file, SIGTERM, remove PID file)
+1. Close the failed Musician's session (`destroy_session` via session-commands.sh, kill window PID, remove PID file)
 2. Check the original task's state — was it successfully claimed by another session?
 3. **If yes (task in `working` state):** The collision is resolved. Clean up the fallback row and proceed.
 4. **If no (task still in a claimable state):** Reset the task row (update state back to `watching`, clear session_id), re-insert the instruction message, re-launch a new Musician.
@@ -593,13 +594,14 @@ For each active Musician task:
 # 2. Kill the session
 kill -0 $(cat temp/musician-{task_id}.pid) 2>/dev/null && kill $(cat temp/musician-{task_id}.pid)
 
-# 3. Clean up PID file
-rm temp/musician-{task_id}.pid
+# 3. Clean up via session layer
+source scripts/session-commands.sh
+kill_claude_in_session "musician-primary"  # or "musician-task-XX" for parallel
 ```
 </core>
 
 <mandatory>
-States MUST be set to `exited` BEFORE sending SIGTERM. The stop hook blocks session exit for Musicians in non-terminal states like `working` or `needs_review`. If the Conductor sends SIGTERM first, the hook may prevent the session from exiting, leaving a zombie process.
+States MUST be set to `exited` BEFORE killing the Claude process. Musicians in non-terminal states like `working` or `needs_review` should not be killed without first updating their state.
 </mandatory>
 
 <core>

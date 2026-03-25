@@ -41,7 +41,7 @@ Handles compacting external child sessions (Musicians, Copyist, Repetiteur) when
 
 Before entering this protocol, the Conductor has:
 
-- The session's PID (from `temp/musician-task-XX.pid`)
+- The session's window and session identifiers (via session layer PID files)
 - The session's session ID (from `orchestration_tasks.session_id`)
 - A HANDOFF document written by the session (if one exists — the Compact Protocol preserves session context via `--resume`, so a missing HANDOFF is not blocking; the resumed session retains its own context of the work in progress)
 - The task ID and current `worked_by` value
@@ -59,9 +59,8 @@ The Musician skill's existing exit flow (HANDOFF writing, `exited` state) is unc
 ### Step 1: Close Old Session
 
 ```bash
-PID=$(cat temp/musician-task-XX.pid)
-kill -0 $PID 2>/dev/null && kill $PID
-rm temp/musician-task-XX.pid
+source scripts/session-commands.sh
+kill_claude_in_session "musician-primary"  # or "musician-task-XX" for parallel
 ```
 
 ### Step 2: Record Baseline
@@ -275,7 +274,7 @@ The compact session does not write to temp/ status files, so the Sentinel's stal
 
 The Compact Protocol as specified targets Musicians. Repetiteur compaction follows the same sequence but with these differences:
 
-- **PID file:** `temp/repetiteur.pid` (instead of `temp/musician-task-XX.pid`)
+- **PID file:** `temp/window-repetiteur.pid` (instead of `temp/window-musician-*.pid`)
 - **Session ID tracking:** Via Conductor state (no database row) — the Repetiteur does not have an `orchestration_tasks` entry
 - **No `worked_by` succession:** The Repetiteur is a single-instance role, not a succession chain
 - **No guard clause:** Repetiteur does not claim tasks via SQL guard clauses
